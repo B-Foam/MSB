@@ -82,6 +82,24 @@ if st.session_state.pagina == 'selecao':
         st.video("https://youtu.be/hY5K55Ha2pg")
         st.write("Assista ao teste de medição do tamanho de bolhas.")
 
+    # --- NOVO BLOCO DE ACESSOS ---
+        st.divider()
+        st.subheader("🔑 Central de Acessos")
+        
+        with st.expander("Clique aqui para ver acessos"):
+            st.markdown(f"""
+            **E-mail**: `msbbfoam@gmail.com`  
+            **Senha**: `Bfoam-50`
+            
+            ---
+            **Links Úteis**:
+            * [🔗 Google Drive](https://drive.google.com)
+            * [🔗 GitHub](https://github.com/B-Foam/MSB)
+            * [🔗 Streamlit Cloud](https://share.streamlit.io)
+            """)
+        
+        st.info("Dúvidas? Entre em contato via WhatsApp para suporte técnico.")
+
 elif st.session_state.pagina == 'cadastro':
     st.subheader(f"Ficha de Cadastro: {st.session_state.tipo_selecionado}")
     if st.button("⬅️ Voltar ao Menu Principal"):
