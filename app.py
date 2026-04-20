@@ -37,7 +37,7 @@ with st.sidebar:
     st.header("Vídeos de Apoio")
     # Lógica para trocar o vídeo conforme a página
     if st.session_state.pagina == 'cadastro':
-        st.video("https://youtu.be/LINK_DO_VIDEO_ESPECIFICO") # Substitua pelo link
+        st.video("https://youtu.be/hY5K55Ha2pg") # Substitua pelo link
         st.write(f"Tutorial: {st.session_state.tipo_selecionado}")
     else:
         st.video("https://youtu.be/hY5K55Ha2pg") # Vídeo da tela inicial
