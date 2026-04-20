@@ -1,0 +1,5 @@
+streamlit
+Pillow
+numpy
+pandas
+# Adicione outras bibliotecas que você importou no seu app.py
