@@ -106,4 +106,4 @@ elif st.session_state.pagina == 'cadastro':
                     except Exception as e:
                         st.error(f"Erro ao salvar: {e}")
             else:
-                st.error("Por favor, faça o upload da imagem primeiro.")
+                st.error("Por favor, faça o upload da imagem primeiro..")
