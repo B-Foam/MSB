@@ -1,5 +1,23 @@
 import streamlit as st
 import base64
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+import io
+from googleapiclient.http import MediaIoBaseUpload
+
+# Configuração do Drive
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+SERVICE_ACCOUNT_FILE = 'credenciais.json' # Nome do seu arquivo JSON
+
+def salvar_no_drive(arquivo_bytes, nome_arquivo):
+    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    service = build('drive', 'v3', credentials=creds)
+    
+    file_metadata = {'name': nome_arquivo, 'parents': ['ID_DA_SUA_PASTA_NO_DRIVE']}
+    media = MediaIoBaseUpload(io.BytesIO(arquivo_bytes), mimetype='image/png')
+    
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    return file.get('id')
 
 # Configuração da Página
 st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
@@ -104,8 +122,14 @@ elif st.session_state.pagina == 'cadastro':
                 outro_dispositivo = st.text_input("Especifique o dispositivo:") if dispositivo == "Outros" else ""
                 
                 if st.form_submit_button("Salvar Registro"):
-                    if uploaded_file:
-                        nome = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{concentracao}_{outro_dispositivo if dispositivo == 'Outros' else dispositivo}.png"
-                        st.success(f"Dados validados! Pronto para salvar como: {nome}")
-                    else:
-                        st.error("Por favor, faça o upload da imagem.")
+    # Geração do nome conforme sua regra
+    # Ex: A001_T001_30s_300_V08.png
+    nome = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{concentracao.replace('.', '').replace('%', '')}_{dispositivo}.png"
+    
+    # Execução do upload
+    try:
+        arquivo_bytes = uploaded_file.getvalue()
+        file_id = salvar_no_drive(arquivo_bytes, nome)
+        st.success(f"Arquivo salvo no Drive com sucesso! ID: {file_id}")
+    except Exception as e:
+        st.error(f"Erro ao salvar: {e}")
