@@ -34,27 +34,6 @@ def ir_para_cadastro(tipo):
 
 # --- PÁGINA DE SELEÇÃO ---
 if st.session_state.pagina == 'selecao':
-    # Sidebar exibida APENAS nesta página
-    with st.sidebar:
-        st.header("Vídeos de Apoio")
-        st.video("https://youtu.be/hY5K55Ha2pg")
-        st.write("Assista ao vídeo geral de introdução.")
-        
-        st.divider()
-        st.subheader("🔑 Central de Acessos")
-        with st.expander("Clique aqui para ver acessos"):
-            st.markdown("""
-            **E-mail**: `msbbfoam@gmail.com`  
-            **Senha**: `Bfoam-50`
-            
-            ---
-            **Links Úteis**:
-            * [🔗 Google Drive](https://drive.google.com)
-            * [🔗 GitHub](https://github.com/B-Foam/MSB)
-            * [🔗 Streamlit Cloud](https://share.streamlit.io)
-            """)
-        st.info("Dúvidas? Entre em contato via WhatsApp.")
-
     logo = get_image_as_base64("logo-msb.png") 
     st.markdown(f'''<div id="header-container"><img src="{logo}">
                   <div><h1>B-Foam</h1><p>Engenharia MSB - Plataforma de Análise</p></div></div>''', unsafe_allow_html=True)
@@ -63,17 +42,24 @@ if st.session_state.pagina == 'selecao':
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento das microbolhas para determinar a longevidade da espuma.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="mv"): ir_para_cadastro("Meia-Vida")
     with c2:
-        st.markdown('<div class="card"><h3>Granulometria</h3><p>Medição do tamanho e distribuição das bolhas para avaliar a homogeneidade da amostra.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Granulometria</h3><p>Medição do tamanho e distribuição das bolhas.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="gr"): ir_para_cadastro("Granulometria")
     with c3:
-        st.markdown('<div class="card"><h3>Estabilidade</h3><p>Avaliação da resistência estrutural da espuma sob variações de pressão e tempo.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Estabilidade</h3><p>Avaliação da resistência estrutural.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="ed"): ir_para_cadastro("Estabilidade Dinâmica")
 
 # --- PÁGINA DE CADASTRO ---
 elif st.session_state.pagina == 'cadastro':
+    # A SIDEBAR SÓ APARECE SE O TIPO FOR GRANULOMETRIA
+    if st.session_state.tipo_selecionado == "Granulometria":
+        with st.sidebar:
+            st.header("Vídeos de Apoio")
+            st.video("https://youtu.be/hY5K55Ha2pg")
+            st.write("Tutorial técnico: Granulometria")
+    
     st.subheader(f"Ficha de Cadastro: {st.session_state.tipo_selecionado}")
     
     if st.button("⬅️ Voltar ao Menu Principal"):
