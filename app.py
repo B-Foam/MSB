@@ -32,17 +32,44 @@ def ir_para_cadastro(tipo):
     st.session_state.pagina = 'cadastro'
     st.session_state.tipo_selecionado = tipo
 
-# --- PÁGINA DE SELEÇÃO ---
+# --- LÓGICA DA SIDEBAR (Vídeos e Acessos) ---
+with st.sidebar:
+    st.header("Vídeos de Apoio")
+    # Lógica para trocar o vídeo conforme a página
+    if st.session_state.pagina == 'cadastro':
+        st.video("https://youtu.be/LINK_DO_VIDEO_ESPECIFICO") # Substitua pelo link
+        st.write(f"Tutorial: {st.session_state.tipo_selecionado}")
+    else:
+        st.video("https://youtu.be/hY5K55Ha2pg") # Vídeo da tela inicial
+        st.write("Assista ao vídeo geral de introdução.")
+    
+    # Central de Acessos aparece APENAS na seleção
+    if st.session_state.pagina == 'selecao':
+        st.divider()
+        st.subheader("🔑 Central de Acessos")
+        with st.expander("Clique aqui para ver acessos"):
+            st.markdown("""
+            **E-mail**: `msbbfoam@gmail.com`  
+            **Senha**: `Bfoam-50`
+            
+            ---
+            **Links Úteis**:
+            * [🔗 Google Drive](https://drive.google.com)
+            * [🔗 GitHub](https://github.com/B-Foam/MSB)
+            * [🔗 Streamlit Cloud](https://share.streamlit.io)
+            """)
+        st.info("Dúvidas? Entre em contato via WhatsApp.")
+
+# --- CONTEÚDO ---
 if st.session_state.pagina == 'selecao':
     logo = get_image_as_base64("logo-msb.png") 
     st.markdown(f'''<div id="header-container"><img src="{logo}">
                   <div><h1>B-Foam</h1><p>Engenharia MSB - Plataforma de Análise</p></div></div>''', unsafe_allow_html=True)
-    
     st.markdown('<p class="titulo-amarelo">Selecione o tipo de análise desejada:</p>', unsafe_allow_html=True)
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento das microbolhas.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="mv"): ir_para_cadastro("Meia-Vida")
     with c2:
         st.markdown('<div class="card"><h3>Granulometria</h3><p>Medição do tamanho e distribuição das bolhas.</p></div>', unsafe_allow_html=True)
@@ -51,17 +78,8 @@ if st.session_state.pagina == 'selecao':
         st.markdown('<div class="card"><h3>Estabilidade</h3><p>Avaliação da resistência estrutural.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="ed"): ir_para_cadastro("Estabilidade Dinâmica")
 
-# --- PÁGINA DE CADASTRO ---
 elif st.session_state.pagina == 'cadastro':
-    # A SIDEBAR SÓ APARECE SE O TIPO FOR GRANULOMETRIA
-    if st.session_state.tipo_selecionado == "Granulometria":
-        with st.sidebar:
-            st.header("Vídeos de Apoio")
-            st.video("https://youtu.be/hY5K55Ha2pg")
-            st.write("Tutorial técnico: Granulometria")
-    
     st.subheader(f"Ficha de Cadastro: {st.session_state.tipo_selecionado}")
-    
     if st.button("⬅️ Voltar ao Menu Principal"):
         st.session_state.pagina = 'selecao'
         st.rerun()
