@@ -1,0 +1,6 @@
+[theme]
+primaryColor="#2E7BCF" # Azul MSB para botões e destaques
+backgroundColor="#0A192F" # Azul Escuro Profundo para o fundo
+secondaryBackgroundColor="#172A46" # Azul Levemente mais claro para os Cards
+textColor="#FFFFFF" # Texto Branco
+font="sans serif"
