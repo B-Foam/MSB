@@ -11,12 +11,34 @@ def get_image_as_base64(path):
         return f"data:image/png;base64,{data}"
     except: return ""
 
-# --- FUNÇÃO DE LAYOUT DA SIDEBAR (Centraliza Acessos e Vídeos) ---
-def sidebar_config(url_video, legenda_video):
+# --- CSS ---
+st.markdown("""
+<style>
+    #header-container { background-color: white; color: black; padding: 20px; border-radius: 10px; margin-bottom: 30px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
+    #header-container img { height: 60px; margin-right: 15px; }
+    .titulo-amarelo { color: #FFD700; font-size: 4.0em; font-weight: bold; text-align: center; margin: 20px 0; }
+    .card { background-color: #1E3A5F; padding: 15px; border-radius: 15px; border: 1px solid #2E7BCF; text-align: center; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+    .card h3 { color: #FFFFFF; font-size: 1.3em; margin: 0 0 10px 0; }
+    .card p { color: #B9D1EA; font-size: 0.8em; margin: 0; line-height: 1.3; }
+    div.stButton { display: flex; justify-content: center; margin-top: 10px; width: 100%; }
+    div.stButton > button { min-width: 120px; padding: 5px 15px; border-radius: 8px; border: 1px solid #2E7BCF; white-space: nowrap; font-size: 0.9em; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- NAVEGAÇÃO ---
+if 'pagina' not in st.session_state: st.session_state.pagina = 'selecao'
+
+def ir_para_cadastro(tipo):
+    st.session_state.pagina = 'cadastro'
+    st.session_state.tipo_selecionado = tipo
+
+# --- PÁGINA DE SELEÇÃO ---
+if st.session_state.pagina == 'selecao':
+    # Sidebar exibida APENAS nesta página
     with st.sidebar:
         st.header("Vídeos de Apoio")
-        st.video(url_video)
-        st.write(legenda_video)
+        st.video("https://youtu.be/hY5K55Ha2pg")
+        st.write("Assista ao vídeo geral de introdução.")
         
         st.divider()
         st.subheader("🔑 Central de Acessos")
@@ -33,52 +55,27 @@ def sidebar_config(url_video, legenda_video):
             """)
         st.info("Dúvidas? Entre em contato via WhatsApp.")
 
-# --- CSS ---
-st.markdown("""
-<style>
-    #header-container { background-color: white; color: black; padding: 20px; border-radius: 10px; margin-bottom: 30px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
-    #header-container img { height: 60px; margin-right: 15px; }
-    .titulo-amarelo { color: #FFD700; font-size: 4.0em; font-weight: bold; text-align: center; margin: 20px 0; }
-    .card { background-color: #1E3A5F; padding: 15px; border-radius: 15px; border: 1px solid #2E7BCF; text-align: center; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
-    .card h3 { color: #FFFFFF; font-size: 1.3em; margin: 0 0 10px 0; }
-    .card p { color: #B9D1EA; font-size: 0.8em; margin: 0; line-height: 1.3; }
-    div.stButton { display: flex; justify-content: center; margin-top: 10px; width: 100%; }
-    div.stButton > button { min-width: 120px; padding: 5px 15px; border-radius: 8px; border: 1px solid #2E7BCF; white-space: nowrap; font-size: 0.9em; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- LÓGICA DE NAVEGAÇÃO ---
-if 'pagina' not in st.session_state: st.session_state.pagina = 'selecao'
-
-def ir_para_cadastro(tipo):
-    st.session_state.pagina = 'cadastro'
-    st.session_state.tipo_selecionado = tipo
-
-if st.session_state.pagina == 'selecao':
-    # Vídeo para a página de seleção
-    sidebar_config("https://youtu.be/hY5K55Ha2pg", "Assista ao vídeo geral de introdução.")
-    
     logo = get_image_as_base64("logo-msb.png") 
     st.markdown(f'''<div id="header-container"><img src="{logo}">
                   <div><h1>B-Foam</h1><p>Engenharia MSB - Plataforma de Análise</p></div></div>''', unsafe_allow_html=True)
+    
     st.markdown('<p class="titulo-amarelo">Selecione o tipo de análise desejada:</p>', unsafe_allow_html=True)
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Meia-Vida</h3><p>Análise do tempo de decaimento das microbolhas para determinar a longevidade da espuma.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="mv"): ir_para_cadastro("Meia-Vida")
     with c2:
-        st.markdown('<div class="card"><h3>Granulometria</h3><p>Medição do tamanho e distribuição das bolhas.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Granulometria</h3><p>Medição do tamanho e distribuição das bolhas para avaliar a homogeneidade da amostra.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="gr"): ir_para_cadastro("Granulometria")
     with c3:
-        st.markdown('<div class="card"><h3>Estabilidade</h3><p>Avaliação da resistência estrutural.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Estabilidade</h3><p>Avaliação da resistência estrutural da espuma sob variações de pressão e tempo.</p></div>', unsafe_allow_html=True)
         if st.button("Selecionar", key="ed"): ir_para_cadastro("Estabilidade Dinâmica")
 
+# --- PÁGINA DE CADASTRO ---
 elif st.session_state.pagina == 'cadastro':
-    # Vídeo para a página de cadastro (Substitua pelo link do vídeo do teste)
-    sidebar_config("https://youtu.be/hY5K55Ha2pg", f"Tutorial técnico: {st.session_state.tipo_selecionado}")
-    
     st.subheader(f"Ficha de Cadastro: {st.session_state.tipo_selecionado}")
+    
     if st.button("⬅️ Voltar ao Menu Principal"):
         st.session_state.pagina = 'selecao'
         st.rerun()
