@@ -293,7 +293,7 @@ elif st.session_state.pagina == "cadastro":
         st.session_state.pagina = "selecao"
         st.rerun()
 
-    # Criação das abas (Isso cria a interface limpa que você pediu)
+    # Criação das abas
     tab_res, tab_cad, tab_cons = st.tabs(["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"])
 
     with tab_res:
@@ -324,6 +324,8 @@ elif st.session_state.pagina == "cadastro":
                         if extensao == "jpg": extensao = "jpeg"
                         nome_final = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{c_clean}_{disp_final}.{extensao}"
                         mime_type = uploaded_file.type or ("image/png" if extensao == "png" else "image/jpeg")
+                        
+                        # Chama a função de salvar
                         sucesso, detalhe = salvar_no_supabase(uploaded_file, nome_final, mime_type)
                         if sucesso:
                             st.success("Salvo com sucesso!")
@@ -342,138 +344,3 @@ elif st.session_state.pagina == "cadastro":
             if lista:
                 escolhido = st.selectbox("Selecione a imagem", lista)
                 st.image(montar_url_publica(escolhido), use_container_width=True)
-    # ========================================================
-    # MODO: CADASTRAR NOVA IMAGEM
-    # ========================================================
-    if modo == "Cadastrar nova imagem":
-        with st.container(border=True):
-            with st.form("form_novo_teste", clear_on_submit=True):
-                amostra = st.text_input("Amostra (ex: 001)")
-                teste = st.text_input("Teste (ex: 001)")
-                tempo = st.number_input(
-                    "Tempo de estabilidade (segundos)",
-                    min_value=0,
-                    step=1
-                )
-
-                concentracao = st.selectbox(
-                    "Concentração do Polidocanol",
-                    ["3,00%", "1,00%", "0,50%", "0,25%"]
-                )
-
-                dispositivo = st.selectbox(
-                    "Dispositivo utilizado",
-                    ["V08", "V09", "V10", "Tessari", "Outros"]
-                )
-
-                outro_dispositivo = ""
-                if dispositivo == "Outros":
-                    outro_dispositivo = st.text_input("Especifique o dispositivo:")
-
-                uploaded_file = st.file_uploader(
-                    "Escolha a imagem do teste:",
-                    type=["png", "jpg", "jpeg"]
-                )
-
-                submitted = st.form_submit_button("Salvar Registro no Supabase")
-
-                if submitted:
-                    if uploaded_file is None:
-                        st.error("Por favor, faça o upload da imagem primeiro.")
-                    else:
-                        c_clean = concentracao.replace(",", "").replace("%", "")
-                        disp_final = outro_dispositivo.strip() if dispositivo == "Outros" else dispositivo
-
-                        if dispositivo == "Outros" and not disp_final:
-                            st.error("Por favor, informe o nome do dispositivo.")
-                        else:
-                            extensao = uploaded_file.name.split(".")[-1].lower()
-                            if extensao == "jpg":
-                                extensao = "jpeg"
-
-                            nome_final = (
-                                f"A{amostra.zfill(3)}_"
-                                f"T{teste.zfill(3)}_"
-                                f"{tempo}s_"
-                                f"{c_clean}_"
-                                f"{disp_final}.{extensao}"
-                            )
-
-                            mime_type = uploaded_file.type
-                            if not mime_type:
-                                mime_type = "image/png" if extensao == "png" else "image/jpeg"
-
-                            with st.spinner("Enviando para o Supabase..."):
-                                sucesso, detalhe = salvar_no_supabase(
-                                    uploaded_file,
-                                    nome_final,
-                                    mime_type
-                                )
-
-                            if sucesso:
-                                st.success(f"Arquivo salvo com sucesso: {nome_final}")
-                                st.info(f"URL pública: {montar_url_publica(nome_final)}")
-
-                                # Atualiza a lista para consulta imediata
-                                st.session_state.lista_imagens_consulta = []
-                                st.session_state.ultimo_termo_busca = None
-                            else:
-                                st.error(f"Erro ao salvar no Supabase: {detalhe}")
-
-    # ========================================================
-    # MODO: CONSULTAR IMAGEM
-    # ========================================================
-    elif modo == "Consultar imagem":
-        with st.container(border=True):
-            st.markdown("## Consultar imagem salva")
-
-            termo_busca = st.text_input(
-                "Buscar por nome do arquivo",
-                placeholder="Ex.: A000, V08, 300, png..."
-            )
-
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                atualizar = st.button("Atualizar lista", use_container_width=True)
-
-            precisa_atualizar = (
-                atualizar
-                or st.session_state.ultimo_termo_busca != termo_busca
-                or not st.session_state.lista_imagens_consulta
-            )
-
-            if precisa_atualizar:
-                with st.spinner("Consultando imagens no Supabase..."):
-                    imagens, erro = listar_imagens_supabase(termo_busca)
-
-                st.session_state.ultimo_termo_busca = termo_busca
-
-                if erro:
-                    st.session_state.lista_imagens_consulta = []
-                    st.error(f"Erro ao listar imagens: {erro}")
-                else:
-                    st.session_state.lista_imagens_consulta = [img["name"] for img in imagens]
-
-            lista_imagens = st.session_state.get("lista_imagens_consulta", [])
-
-            if not lista_imagens:
-                st.warning("Nenhuma imagem encontrada.")
-            else:
-                arquivo_escolhido = st.selectbox(
-                    "Selecione a imagem",
-                    lista_imagens,
-                    index=0
-                )
-
-                if arquivo_escolhido:
-                    url_publica = montar_url_publica(arquivo_escolhido)
-
-                    st.markdown("### Pré-visualização")
-                    st.image(
-                        url_publica,
-                        caption=arquivo_escolhido,
-                        use_container_width=True
-                    )
-
-                    st.write(f"**Arquivo:** {arquivo_escolhido}")
-                    st.write(f"**URL pública:** {url_publica}")
