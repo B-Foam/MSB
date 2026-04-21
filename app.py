@@ -1,4 +1,5 @@
-import io
+import os
+import tempfile
 import streamlit as st
 from supabase import create_client
 
@@ -10,7 +11,7 @@ st.set_page_config(
 )
 
 # --- CONFIGURAÇÃO DO SUPABASE ---
-BUCKET_NAME = "imbfoam"  # confirme se é exatamente este nome
+BUCKET_NAME = "imbfoam"  # confirme o nome exato do bucket
 
 
 def get_supabase_client():
@@ -19,26 +20,38 @@ def get_supabase_client():
     return create_client(url, key)
 
 
-def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
+def salvar_no_supabase(uploaded_file, nome_arquivo):
+    temp_path = None
+
     try:
         supabase = get_supabase_client()
-        
-        # O Supabase SDK espera os bytes diretamente.
-        # Não use BytesIO aqui.
-        response = supabase.storage.from_(BUCKET_NAME).upload(
-            path=nome_arquivo,
-            file=arquivo_bytes,
-            file_options={"content-type": mime_type, "upsert": "true"}
-        )
-        
-        # Apenas retorne True se a operação não levantar exceção.
-        # Não tente acessar response.text ou outros atributos.
-        return True
+
+        extensao = uploaded_file.name.split(".")[-1].lower()
+        if extensao == "jpg":
+            extensao = "jpeg"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extensao}") as tmp:
+            tmp.write(uploaded_file.getbuffer())
+            temp_path = tmp.name
+
+        with open(temp_path, "rb") as f:
+            response = supabase.storage.from_(BUCKET_NAME).upload(
+                path=nome_arquivo,
+                file=f,
+                file_options={
+                    "cache-control": "3600",
+                    "upsert": "true"
+                }
+            )
+
+        return True, response
+
     except Exception as e:
-        st.error(f"Erro ao salvar no Supabase: {e}")
-        return False
+        return False, repr(e)
 
-
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 # --- CSS E ESTILIZAÇÃO ---
@@ -195,26 +208,11 @@ elif st.session_state.pagina == "cadastro":
                         f"{disp_final}.{extensao}"
                     )
 
-                    mime_type = uploaded_file.type
-                    if not mime_type:
-                        mime_type = "image/png" if extensao == "png" else "image/jpeg"
+                    with st.spinner("Enviando para o Supabase..."):
+                        sucesso, detalhe = salvar_no_supabase(uploaded_file, nome_final)
 
-                   # 1. Definimos a variável fora do bloco para garantir que ela exista
-                sucesso = False 
-                
-                # 2. O 'with' garante a animação de carregamento
-                with st.spinner("Enviando para o Supabase..."):
-                    # 3. O código aqui dentro deve ter 4 ou 8 espaços à direita
-                    sucesso = salvar_no_supabase(
-                        uploaded_file.getvalue(),
-                        nome_final,
-                        mime_type
-                    )
-
-                # 4. O 'if' deve estar alinhado com o 'with', não dentro dele
-                if sucesso:
-                    st.success(f"Arquivo salvo com sucesso: {nome_final}")
-                else:
-                    st.error("Falha ao salvar o arquivo. Verifique se o nome do bucket está correto e se há permissão de escrita.")
-
-                
+                    if sucesso:
+                        st.success(f"Arquivo salvo com sucesso: {nome_final}")
+                    else:
+                        st.error(f"Erro ao salvar no Supabase: {detalhe}")
+                        st.error("Falha ao salvar o arquivo. Verifique bucket, chave e permissões.")
