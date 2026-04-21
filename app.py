@@ -252,17 +252,17 @@ if st.session_state.pagina == "selecao":
     with c1:
         if st.button("Teste de Meia-Vida", use_container_width=True):
             ir_para_cadastro("Meia-Vida")
-        st.caption("Avalia o tempo de decaimento da espuma.")
+        st.caption("Avalia o tempo de decaimento da espuma e compara o resultado com o valor de referência de 120 segundos, usado como parâmetro de estabilidade para a espuma de polidocanol..")
 
     with c2:
         if st.button("Teste de Granulometria", use_container_width=True):
             ir_para_cadastro("Granulometria")
-        st.caption("Mede a distribuição do tamanho das bolhas.")
+        st.caption("Analisa a distribuição do tamanho das bolhas, com foco na quantidade de bolhas maiores que 500 µm, permitindo comparar a uniformidade e a adequação da espuma para aplicação em escleroterapia.")
 
     with c3:
         if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
             ir_para_cadastro("Estabilidade Dinâmica")
-        st.caption("Verifica a resistência estrutural da espuma.")
+        st.caption("Verifica o comportamento da espuma sob condições dinâmicas, avaliando sua resistência ao colapso e ao decaimento estrutural ao longo do tempo, aspecto importante para o desempenho da espuma de polidocanol no tratamento de varizes.")
 
 
 # ============================================================
