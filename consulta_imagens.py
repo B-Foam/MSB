@@ -9,10 +9,8 @@ def render_consulta_imagens(
     with st.container(border=True):
         st.subheader("Consultar imagens")
 
-        termo_busca = st.text_input("Buscar por nome do arquivo")
-
         if st.button("Atualizar lista", key="btn_atualizar_lista_consulta"):
-            imagens, erro = listar_imagens_supabase(termo_busca)
+            imagens, erro = listar_imagens_supabase("")
 
             if erro:
                 st.error(f"Erro: {erro}")
@@ -34,4 +32,4 @@ def render_consulta_imagens(
                     use_container_width=True
                 )
         else:
-            st.info("Nenhuma imagem carregada ainda.")
+            st.info("Clique em 'Atualizar lista' para carregar as imagens.")
