@@ -8,15 +8,14 @@ from googleapiclient.http import MediaIoBaseUpload
 
 
 
+
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
 
 # --- FUNÇÃO PARA SALVAR NO DRIVE (SEGURA) ---
 def get_drive_service():
-    # Carrega a string JSON do Secrets
-    creds_json = st.secrets["gcp_service_account"]
-    # Converte a string para um dicionário Python real
-    creds_dict = json.loads(creds_json)
+    # O Streamlit já transforma o bloco [gcp_service_account] em um dicionário
+    creds_dict = st.secrets["gcp_service_account"]
     
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
