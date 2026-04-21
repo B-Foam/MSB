@@ -23,7 +23,7 @@ def tela_login():
     password = st.text_input("Digite a senha principal:", type="password")
 
     if st.button("Entrar"):
-        if password == "BbdYvIBfoam":
+        if password == "bfoam195":
             st.session_state.autenticado = True
             st.rerun()
         else:
