@@ -14,12 +14,16 @@ st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
 
 # --- FUNÇÃO PARA SALVAR NO DRIVE (SEGURA) ---
 def get_drive_service():
-    # 1. Pega o dicionário do secrets
-    creds_dict = st.secrets["gcp_service_account"].copy()
+    # 1. Acessa o segredo e converte explicitamente para um dicionário dict()
+    # Isso resolve o erro de 'st.secrets' não ter o método 'copy'
+    creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # 2. Corrige a chave privada: substitui os espaços por quebras de linha reais
-    # Isso reconstrói o formato PEM que o Google exige
-    creds_dict["private_key"] = creds_dict["private_key"].replace(" ", "\n")
+    # 2. Corrigir a chave privada: 
+    # O segredo é que o formato PEM exige quebras de linha reais (\n) 
+    # onde hoje existem espaços ou caracteres de formatação.
+    if "private_key" in creds_dict:
+        # Se a chave foi colada com espaços, vamos garantir que o PEM esteja correto
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
