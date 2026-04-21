@@ -14,8 +14,12 @@ st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
 
 # --- FUNÇÃO PARA SALVAR NO DRIVE (SEGURA) ---
 def get_drive_service():
-    # O Streamlit já transforma o bloco [gcp_service_account] em um dicionário
-    creds_dict = st.secrets["gcp_service_account"]
+    # 1. Pega o dicionário do secrets
+    creds_dict = st.secrets["gcp_service_account"].copy()
+    
+    # 2. Corrige a chave privada: substitui os espaços por quebras de linha reais
+    # Isso reconstrói o formato PEM que o Google exige
+    creds_dict["private_key"] = creds_dict["private_key"].replace(" ", "\n")
     
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
