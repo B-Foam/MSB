@@ -1,27 +1,39 @@
 import requests
 import streamlit as st
 from consulta_imagens import render_consulta_imagens
-import streamlit as st
 
-# 1. Inicializa o estado de autenticação
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA
+# ============================================================
+st.set_page_config(
+    page_title="B-Foam MSB",
+    page_icon="🔬",
+    layout="centered"
+)
+
+# ============================================================
+# LOGIN
+# ============================================================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
-# 2. Tela de Login
+
 def tela_login():
     st.title("🔒 Acesso Restrito")
     password = st.text_input("Digite a senha principal:", type="password")
+
     if st.button("Entrar"):
-        if password == "BbdYvIBfoam": # A mesma senha que você já usava no expander
+        if password == "BbdYvIBfoam":
             st.session_state.autenticado = True
-            st.rerun() # Recarrega a página para mostrar o app
+            st.rerun()
         else:
             st.error("Senha incorreta!")
 
-# 3. Lógica principal: se não estiver autenticado, mostra o login
+
 if not st.session_state.autenticado:
     tela_login()
-else:
+    st.stop()
+
 
 def get_image_as_base64(path):
     try:
@@ -31,15 +43,7 @@ def get_image_as_base64(path):
         return f"data:image/png;base64,{data}"
     except Exception:
         return ""
-        
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(
-    page_title="B-Foam MSB",
-    page_icon="🔬",
-    layout="centered"
-)
+
 
 # ============================================================
 # CONFIGURAÇÕES
@@ -166,7 +170,7 @@ st.markdown("""
         margin-top: 10px;
         margin-bottom: 10px;
     }
-    
+
     .topo-card {
         background-color: white;
         border-radius: 12px;
@@ -248,8 +252,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🔗 Links Úteis")
-    
-    # Links do Drive com ícones e formatação limpa
+
     st.markdown("""
     - 📂 **[Referências](https://drive.google.com/drive/folders/1t0-cqQjqLRbiexGowbBqmmQDoe3RMG2I?usp=sharing)**
     - 📄 **[Documentos Controlados](https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing)**
@@ -291,17 +294,29 @@ if st.session_state.pagina == "selecao":
     with c1:
         if st.button("Teste de Meia-Vida", use_container_width=True):
             ir_para_cadastro("Meia-Vida")
-        st.caption("Avalia o tempo de decaimento da espuma e compara o resultado com o valor de referência de 120 segundos, usado como parâmetro de estabilidade para a espuma de polidocanol..")
+        st.caption(
+            "Avalia o tempo de decaimento da espuma e compara o resultado "
+            "com o valor de referência de 120 segundos, usado como parâmetro "
+            "de estabilidade para a espuma de polidocanol."
+        )
 
     with c2:
         if st.button("Teste de Granulometria", use_container_width=True):
             ir_para_cadastro("Granulometria")
-        st.caption("Analisa a distribuição do tamanho das bolhas, com foco na quantidade de bolhas maiores que 500 µm, permitindo comparar a uniformidade e a adequação da espuma para aplicação em escleroterapia.")
+        st.caption(
+            "Analisa a distribuição do tamanho das bolhas, com foco na "
+            "quantidade de bolhas maiores que 500 µm, permitindo comparar "
+            "a uniformidade e a adequação da espuma para aplicação em escleroterapia."
+        )
 
     with c3:
         if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
             ir_para_cadastro("Estabilidade Dinâmica")
-        st.caption("Verifica o comportamento da espuma sob condições dinâmicas, avaliando sua resistência ao colapso e ao decaimento estrutural ao longo do tempo, aspecto importante para o desempenho da espuma de polidocanol no tratamento de varizes.")
+        st.caption(
+            "Verifica o comportamento da espuma sob condições dinâmicas, "
+            "avaliando sua resistência ao colapso e ao decaimento estrutural "
+            "ao longo do tempo."
+        )
 
 
 # ============================================================
@@ -314,8 +329,9 @@ elif st.session_state.pagina == "cadastro":
         st.session_state.pagina = "selecao"
         st.rerun()
 
-         # Criação das abas
-    tab_res, tab_cad, tab_cons = st.tabs(["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"])
+    tab_res, tab_cad, tab_cons = st.tabs(
+        ["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"]
+    )
 
     with tab_res:
         st.info("Aqui serão exibidos os resultados das análises.")
@@ -325,15 +341,28 @@ elif st.session_state.pagina == "cadastro":
             with st.form("form_novo_teste", clear_on_submit=True):
                 amostra = st.text_input("Amostra (ex: 001)")
                 teste = st.text_input("Teste (ex: 001)")
-                tempo = st.number_input("Tempo de estabilidade (segundos)", min_value=0, step=1)
-                concentracao = st.selectbox("Concentração do Polidocanol", ["3,00%", "1,00%", "0,50%", "0,25%"])
-                dispositivo = st.selectbox("Dispositivo utilizado", ["V08", "V09", "V10", "Tessari", "Outros"])
+                tempo = st.number_input(
+                    "Tempo de estabilidade (segundos)",
+                    min_value=0,
+                    step=1
+                )
+                concentracao = st.selectbox(
+                    "Concentração do Polidocanol",
+                    ["3,00%", "1,00%", "0,50%", "0,25%"]
+                )
+                dispositivo = st.selectbox(
+                    "Dispositivo utilizado",
+                    ["V08", "V09", "V10", "Tessari", "Outros"]
+                )
 
                 outro_dispositivo = ""
                 if dispositivo == "Outros":
                     outro_dispositivo = st.text_input("Especifique o dispositivo:")
 
-                uploaded_file = st.file_uploader("Escolha a imagem do teste:", type=["png", "jpg", "jpeg"])
+                uploaded_file = st.file_uploader(
+                    "Escolha a imagem do teste:",
+                    type=["png", "jpg", "jpeg"]
+                )
                 submitted = st.form_submit_button("Salvar Registro")
 
                 if submitted:
@@ -341,16 +370,33 @@ elif st.session_state.pagina == "cadastro":
                         st.error("Upload necessário.")
                     else:
                         c_clean = concentracao.replace(",", "").replace("%", "")
-                        disp_final = outro_dispositivo.strip() if dispositivo == "Outros" else dispositivo
-                        extensao = uploaded_file.name.split(".")[-1].lower()
+                        disp_final = (
+                            outro_dispositivo.strip()
+                            if dispositivo == "Outros"
+                            else dispositivo
+                        )
 
+                        extensao = uploaded_file.name.split(".")[-1].lower()
                         if extensao == "jpg":
                             extensao = "jpeg"
 
-                        nome_final = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{c_clean}_{disp_final}.{extensao}"
-                        mime_type = uploaded_file.type or ("image/png" if extensao == "png" else "image/jpeg")
+                        nome_final = (
+                            f"A{amostra.zfill(3)}_"
+                            f"T{teste.zfill(3)}_"
+                            f"{tempo}s_"
+                            f"{c_clean}_"
+                            f"{disp_final}.{extensao}"
+                        )
 
-                        sucesso, detalhe = salvar_no_supabase(uploaded_file, nome_final, mime_type)
+                        mime_type = uploaded_file.type or (
+                            "image/png" if extensao == "png" else "image/jpeg"
+                        )
+
+                        sucesso, detalhe = salvar_no_supabase(
+                            uploaded_file,
+                            nome_final,
+                            mime_type
+                        )
 
                         if sucesso:
                             st.success("Salvo com sucesso!")
