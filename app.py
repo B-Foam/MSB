@@ -26,13 +26,39 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 def salvar_no_drive(arquivo_bytes, nome_arquivo):
-    service = get_drive_service()
-    # SUBSTITUA 'SUA_PASTA_ID_AQUI' pelo ID real da pasta (encontrado na URL do Drive)
-    folder_id = 'SUA_PASTA_ID_AQUI' 
-    file_metadata = {'name': nome_arquivo, 'parents': [folder_id]}
-    media = MediaIoBaseUpload(io.BytesIO(arquivo_bytes), mimetype='image/png')
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
+    """
+    Salva um arquivo bytes no Google Drive em uma pasta específica.
+    """
+    try:
+        # 1. Obter serviço autenticado
+        creds_dict = json.loads(st.secrets["gcp_service_account"]["key"])
+        creds = service_account.Credentials.from_service_account_info(
+            creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        service = build('drive', 'v3', credentials=creds)
+        
+        # 2. ID da pasta (Substitua pelo ID que você pegou na URL do seu Drive)
+        folder_id = 'https://drive.google.com/drive/u/6/folders/1JhYTZ74AYLu0FZAoaE4mb-nD7IFYAP5i' 
+        
+        # 3. Metadados do arquivo
+        file_metadata = {
+            'name': nome_arquivo,
+            'parents': [folder_id]
+        }
+        
+        # 4. Upload
+        media = MediaIoBaseUpload(io.BytesIO(arquivo_bytes), mimetype='image/png')
+        file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id'
+        ).execute()
+        
+        return file.get('id')
+        
+    except Exception as e:
+        st.error(f"Erro ao comunicar com o Google Drive: {e}")
+        return None
 
 def get_image_as_base64(path):
     try:
