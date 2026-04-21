@@ -1,5 +1,6 @@
 import requests
 import streamlit as st
+from consulta_imagens import render_consulta_imagens
 
 
 def get_image_as_base64(path):
@@ -332,15 +333,9 @@ elif st.session_state.pagina == "cadastro":
                         else:
                             st.error(f"Erro: {detalhe}")
 
-    with tab_cons:
-        with st.container(border=True):
-            termo_busca = st.text_input("Buscar por nome do arquivo")
-            if st.button("Atualizar lista"):
-                imagens, erro = listar_imagens_supabase(termo_busca)
-                if erro: st.error(f"Erro: {erro}")
-                else: st.session_state.lista_imagens_consulta = [img["name"] for img in imagens]
-            
-            lista = st.session_state.get("lista_imagens_consulta", [])
-            if lista:
-                escolhido = st.selectbox("Selecione a imagem", lista)
-                st.image(montar_url_publica(escolhido), use_container_width=True)
+   with tab_cons:
+    render_consulta_imagens(
+        listar_imagens_supabase=listar_imagens_supabase,
+        montar_url_publica=montar_url_publica,
+        session_state=st.session_state
+    )
