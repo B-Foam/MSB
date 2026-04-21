@@ -1,7 +1,7 @@
 import streamlit as st
 import base64
 import io
-fimport streamlit as st
+import streamlit as st
 from supabase import create_client
 
 # --- CONFIGURAÇÃO E SUPABASE ---
