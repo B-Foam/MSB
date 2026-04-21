@@ -200,14 +200,15 @@ elif st.session_state.pagina == "cadastro":
                         mime_type = "image/png" if extensao == "png" else "image/jpeg"
 
                     with st.spinner("Enviando para o Supabase..."):
-    # Chamada da função corrigida que retorna True ou False
-    sucesso = salvar_no_supabase(
-        uploaded_file.getvalue(), # Passa os bytes puros
-        nome_final,
-        mime_type
-    )
+                    # O código abaixo deve estar alinhado à direita do 'with'
+                    sucesso = salvar_no_supabase(
+                        uploaded_file.getvalue(),
+                        nome_final,
+                        mime_type
+                    )
 
-if sucesso: # Verifica se foi True
-    st.success(f"Arquivo salvo com sucesso: {nome_final}")
-else:
-    st.error("Falha ao salvar o arquivo. Verifique as permissões do bucket.")
+                # Isso aqui deve estar alinhado com o 'with' (fora dele)
+                if sucesso:
+                    st.success(f"Arquivo salvo com sucesso: {nome_final}")
+                else:
+                    st.error("Falha ao salvar o arquivo.")
