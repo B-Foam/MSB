@@ -2,8 +2,4 @@ streamlit
 Pillow
 numpy
 pandas
-google-api-python-client
-google-auth
-google-auth-httplib2
-google-auth-oauthlib
-# Adicione outras bibliotecas que você importou no seu app.py
+supabase
