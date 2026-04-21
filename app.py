@@ -294,7 +294,7 @@ elif st.session_state.pagina == "cadastro":
         st.session_state.pagina = "selecao"
         st.rerun()
 
-    # Criação das abas
+         # Criação das abas
     tab_res, tab_cad, tab_cons = st.tabs(["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"])
 
     with tab_res:
@@ -308,10 +308,11 @@ elif st.session_state.pagina == "cadastro":
                 tempo = st.number_input("Tempo de estabilidade (segundos)", min_value=0, step=1)
                 concentracao = st.selectbox("Concentração do Polidocanol", ["3,00%", "1,00%", "0,50%", "0,25%"])
                 dispositivo = st.selectbox("Dispositivo utilizado", ["V08", "V09", "V10", "Tessari", "Outros"])
-                
+
                 outro_dispositivo = ""
                 if dispositivo == "Outros":
                     outro_dispositivo = st.text_input("Especifique o dispositivo:")
+
                 uploaded_file = st.file_uploader("Escolha a imagem do teste:", type=["png", "jpg", "jpeg"])
                 submitted = st.form_submit_button("Salvar Registro")
 
@@ -322,20 +323,23 @@ elif st.session_state.pagina == "cadastro":
                         c_clean = concentracao.replace(",", "").replace("%", "")
                         disp_final = outro_dispositivo.strip() if dispositivo == "Outros" else dispositivo
                         extensao = uploaded_file.name.split(".")[-1].lower()
-                        if extensao == "jpg": extensao = "jpeg"
+
+                        if extensao == "jpg":
+                            extensao = "jpeg"
+
                         nome_final = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{c_clean}_{disp_final}.{extensao}"
                         mime_type = uploaded_file.type or ("image/png" if extensao == "png" else "image/jpeg")
-                        
-                        # Chama a função de salvar
+
                         sucesso, detalhe = salvar_no_supabase(uploaded_file, nome_final, mime_type)
+
                         if sucesso:
                             st.success("Salvo com sucesso!")
                         else:
                             st.error(f"Erro: {detalhe}")
 
-   with tab_cons:
-    render_consulta_imagens(
-        listar_imagens_supabase=listar_imagens_supabase,
-        montar_url_publica=montar_url_publica,
-        session_state=st.session_state
-    )
+    with tab_cons:
+        render_consulta_imagens(
+            listar_imagens_supabase=listar_imagens_supabase,
+            montar_url_publica=montar_url_publica,
+            session_state=st.session_state
+        )
