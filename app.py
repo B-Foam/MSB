@@ -1,29 +1,41 @@
 import streamlit as st
-import base64
-import io
-import streamlit as st
 from supabase import create_client
 
-# --- CONFIGURAÇÃO E SUPABASE ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(
+    page_title="B-Foam MSB",
+    page_icon="🔬",
+    layout="centered"
+)
+
+# --- CONFIGURAÇÃO DO SUPABASE ---
+BUCKET_NAME = "imbfoam"  # troque aqui se o nome real do bucket for outro
+
+
 def get_supabase_client():
     url = st.secrets["supabase"]["SUPABASE_URL"]
     key = st.secrets["supabase"]["SUPABASE_KEY"]
     return create_client(url, key)
 
-# --- NOVA FUNÇÃO DE UPLOAD ---
+
 def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
     try:
         supabase = get_supabase_client()
-        # 'imbfoam' é o nome do seu bucket
-        response = supabase.storage.from_("imbfoam").upload(
+
+        response = supabase.storage.from_(BUCKET_NAME).upload(
             path=nome_arquivo,
             file=arquivo_bytes,
-            file_options={"content-type": mime_type}
+            file_options={
+                "content-type": mime_type,
+                "upsert": "false"
+            }
         )
-        return True
+
+        return response
+
     except Exception as e:
         st.error(f"Erro ao salvar no Supabase: {e}")
-        return False
+        return None
 
 
 # --- CSS E ESTILIZAÇÃO ---
@@ -78,7 +90,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # --- LÓGICA DE NAVEGAÇÃO ---
 if "pagina" not in st.session_state:
     st.session_state.pagina = "selecao"
@@ -89,13 +100,12 @@ def ir_para_cadastro(tipo):
     st.session_state.tipo_selecionado = tipo
 
 
-# --- SIDEBAR (Vídeos e Acessos) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("Vídeos de Apoio")
     st.video("https://youtu.be/hY5K55Ha2pg")
     st.write(f"Tutorial: {st.session_state.get('tipo_selecionado', 'Geral')}")
 
-    # A Central de Acessos aparece APENAS na seleção
     if st.session_state.pagina == "selecao":
         st.divider()
         st.subheader("🔑 Central de Acessos")
@@ -104,7 +114,6 @@ with st.sidebar:
             **E-mail**: `msbbfoam@gmail.com`  
             **Senha**: `Bfoam-50`
             """)
-
 
 # --- CONTEÚDO DAS PÁGINAS ---
 if st.session_state.pagina == "selecao":
@@ -159,22 +168,46 @@ elif st.session_state.pagina == "cadastro":
             type=["png", "jpg", "jpeg"]
         )
 
-        submitted = st.form_submit_button("Salvar Registro no Drive")
+        submitted = st.form_submit_button("Salvar Registro no Supabase")
 
         if submitted:
             if uploaded_file is None:
                 st.error("Por favor, faça o upload da imagem primeiro.")
             else:
-                # ... (Lógica de montagem do nome_final continua igual) ...
+                c_clean = concentracao.replace(",", "").replace("%", "")
+                disp_final = outro_dispositivo.strip() if dispositivo == "Outros" else dispositivo
 
-                with st.spinner("Enviando para o Supabase..."):
-                    sucesso = salvar_no_supabase(
-                        uploaded_file.getvalue(),
-                        nome_final,
-                        mime_type
+                if dispositivo == "Outros" and not disp_final:
+                    st.error("Por favor, informe o nome do dispositivo.")
+                else:
+                    extensao = uploaded_file.name.split(".")[-1].lower()
+
+                    if extensao == "jpg":
+                        extensao = "jpeg"
+
+                    nome_final = (
+                        f"A{amostra.zfill(3)}_"
+                        f"T{teste.zfill(3)}_"
+                        f"{tempo}s_"
+                        f"{c_clean}_"
+                        f"{disp_final}.{extensao}"
                     )
 
-                if sucesso:
-                    st.success(f"Arquivo salvo com sucesso: {nome_final}")
-                else:
-                    st.error("Falha ao salvar o arquivo.")
+                    mime_type = uploaded_file.type
+                    if not mime_type:
+                        if extensao == "png":
+                            mime_type = "image/png"
+                        else:
+                            mime_type = "image/jpeg"
+
+                    with st.spinner("Enviando para o Supabase..."):
+                        resposta = salvar_no_supabase(
+                            uploaded_file.getvalue(),
+                            nome_final,
+                            mime_type
+                        )
+
+                    if resposta:
+                        st.success(f"Arquivo salvo com sucesso: {nome_final}")
+                    else:
+                        st.error("Falha ao salvar o arquivo.")
