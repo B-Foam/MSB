@@ -1,59 +1,49 @@
 import streamlit as st
 import base64
 import io
-import json
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
 
-
-
-
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
 
-# --- FUNÇÃO PARA SALVAR NO DRIVE (SEGURA) ---
+# --- FUNÇÃO PARA OBTER SERVIÇO DO DRIVE ---
 def get_drive_service():
-    # Carrega a string JSON do segredo 'key' e transforma em dicionário
-    secret_data = st.secrets["gcp_service_account"]
-    creds_dict = json.loads(secret_data["key"])
-    
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
-    )
-    return build('drive', 'v3', credentials=creds)
+    creds_dict = dict(st.secrets["gcp_service_account"])
 
-def salvar_no_drive(arquivo_bytes, nome_arquivo):
-    """
-    Salva um arquivo bytes no Google Drive em uma pasta específica.
-    """
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/drive.file"]
+    )
+
+    return build("drive", "v3", credentials=creds)
+
+# --- FUNÇÃO PARA SALVAR NO DRIVE ---
+def salvar_no_drive(arquivo_bytes, nome_arquivo, mime_type):
     try:
-        # 1. Obter serviço autenticado
-        creds_dict = json.loads(st.secrets["gcp_service_account"]["key"])
-        creds = service_account.Credentials.from_service_account_info(
-            creds_dict, scopes=['https://www.googleapis.com/auth/drive.file']
-        )
-        service = build('drive', 'v3', credentials=creds)
-        
-        # 2. ID da pasta (Substitua pelo ID que você pegou na URL do seu Drive)
-        folder_id = '1JhYTZ74AYLu0FZAoaE4mb-nD7IFYAP5i' 
-        
-        # 3. Metadados do arquivo
+        service = get_drive_service()
+        folder_id = st.secrets["google_drive"]["folder_id"]
+
         file_metadata = {
-            'name': nome_arquivo,
-            'parents': [folder_id]
+            "name": nome_arquivo,
+            "parents": [folder_id]
         }
-        
-        # 4. Upload
-        media = MediaIoBaseUpload(io.BytesIO(arquivo_bytes), mimetype='image/png')
+
+        media = MediaIoBaseUpload(
+            io.BytesIO(arquivo_bytes),
+            mimetype=mime_type,
+            resumable=False
+        )
+
         file = service.files().create(
-            body=file_metadata, 
-            media_body=media, 
-            fields='id'
+            body=file_metadata,
+            media_body=media,
+            fields="id, name"
         ).execute()
-        
-        return file.get('id')
-        
+
+        return file.get("id")
+
     except Exception as e:
         st.error(f"Erro ao comunicar com o Google Drive: {e}")
         return None
@@ -63,7 +53,9 @@ def get_image_as_base64(path):
         with open(path, "rb") as image_file:
             data = base64.b64encode(image_file.read()).decode()
         return f"data:image/png;base64,{data}"
-    except: return ""
+    except:
+        return ""
+
 
 # --- CSS E ESTILIZAÇÃO ---
 st.markdown("""
