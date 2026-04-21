@@ -1,63 +1,29 @@
 import streamlit as st
 import base64
 import io
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from googleapiclient.http import MediaIoBaseUpload
+fimport streamlit as st
+from supabase import create_client
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
+# --- CONFIGURAÇÃO E SUPABASE ---
+def get_supabase_client():
+    url = st.secrets["supabase"]["SUPABASE_URL"]
+    key = st.secrets["supabase"]["SUPABASE_KEY"]
+    return create_client(url, key)
 
-
-# --- FUNÇÃO PARA OBTER SERVIÇO DO DRIVE ---
-def get_drive_service():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict,
-        scopes=["https://www.googleapis.com/auth/drive.file"]
-    )
-
-    return build("drive", "v3", credentials=creds)
-
-
-# --- FUNÇÃO PARA SALVAR NO DRIVE ---
-def salvar_no_drive(arquivo_bytes, nome_arquivo, mime_type):
+# --- NOVA FUNÇÃO DE UPLOAD ---
+def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
     try:
-        service = get_drive_service()
-        folder_id = st.secrets["google_drive"]["folder_id"]
-
-        file_metadata = {
-            "name": nome_arquivo,
-            "parents": [folder_id]
-        }
-
-        media = MediaIoBaseUpload(
-            io.BytesIO(arquivo_bytes),
-            mimetype=mime_type,
-            resumable=False
+        supabase = get_supabase_client()
+        # 'imbfoam' é o nome do seu bucket
+        response = supabase.storage.from_("imbfoam").upload(
+            path=nome_arquivo,
+            file=arquivo_bytes,
+            file_options={"content-type": mime_type}
         )
-
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id, name"
-        ).execute()
-
-        return file.get("id")
-
+        return True
     except Exception as e:
-        st.error(f"Erro ao comunicar com o Google Drive: {e}")
-        return None
-
-
-def get_image_as_base64(path):
-    try:
-        with open(path, "rb") as image_file:
-            data = base64.b64encode(image_file.read()).decode()
-        return f"data:image/png;base64,{data}"
-    except Exception:
-        return ""
+        st.error(f"Erro ao salvar no Supabase: {e}")
+        return False
 
 
 # --- CSS E ESTILIZAÇÃO ---
@@ -199,36 +165,16 @@ elif st.session_state.pagina == "cadastro":
             if uploaded_file is None:
                 st.error("Por favor, faça o upload da imagem primeiro.")
             else:
-                c_clean = concentracao.replace(",", "").replace("%", "")
-                disp_final = outro_dispositivo if dispositivo == "Outros" else dispositivo
+                # ... (Lógica de montagem do nome_final continua igual) ...
 
-                extensao = uploaded_file.name.split(".")[-1].lower()
-                if extensao == "jpg":
-                    extensao = "jpeg"
-
-                nome_final = (
-                    f"A{amostra.zfill(3)}_"
-                    f"T{teste.zfill(3)}_"
-                    f"{tempo}s_"
-                    f"{c_clean}_"
-                    f"{disp_final}.{extensao}"
-                )
-
-                mime_type = uploaded_file.type
-                if not mime_type:
-                    if extensao == "png":
-                        mime_type = "image/png"
-                    else:
-                        mime_type = "image/jpeg"
-
-                with st.spinner("Salvando no Drive..."):
-                    file_id = salvar_no_drive(
+                with st.spinner("Enviando para o Supabase..."):
+                    sucesso = salvar_no_supabase(
                         uploaded_file.getvalue(),
                         nome_final,
                         mime_type
                     )
 
-                if file_id:
-                    st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
+                if sucesso:
+                    st.success(f"Arquivo salvo com sucesso: {nome_final}")
                 else:
-                    st.error("O arquivo não foi salvo no Drive.")
+                    st.error("Falha ao salvar o arquivo.")
