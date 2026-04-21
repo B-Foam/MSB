@@ -14,10 +14,8 @@ st.set_page_config(page_title="B-Foam MSB", page_icon="🔬", layout="centered")
 
 # --- FUNÇÃO PARA SALVAR NO DRIVE (SEGURA) ---
 def get_drive_service():
-    # Acessa o dicionário configurado no Secrets
+    # Carrega a string JSON do segredo 'key' e transforma em dicionário
     secret_data = st.secrets["gcp_service_account"]
-    
-    # Extrai a string JSON da chave 'key' e converte para dicionário
     creds_dict = json.loads(secret_data["key"])
     
     creds = service_account.Credentials.from_service_account_info(
