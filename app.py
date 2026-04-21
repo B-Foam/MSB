@@ -122,9 +122,21 @@ elif st.session_state.pagina == 'cadastro':
                 disp_final = outro_dispositivo if dispositivo == "Outros" else dispositivo
                 nome_final = f"A{amostra.zfill(3)}_T{teste.zfill(3)}_{tempo}s_{c_clean}_{disp_final}.png"
                 
-                with st.spinner('Salvando no Drive...'):
-                    try:
-                        file_id = salvar_no_drive(uploaded_file.getvalue(), nome_final)
+              with st.spinner("Salvando no Drive..."):
+                     mime_type = uploaded_file.type
+                if not mime_type:
+                    mime_type = "image/png"
+
+    file_id = salvar_no_drive(
+        uploaded_file.getvalue(),
+        nome_final,
+        mime_type
+    )
+
+    if file_id:
+        st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
+    else:
+        st.error("O arquivo não foi salvo no Drive.")
                         st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
                     except Exception as e:
                         st.error(f"Erro ao salvar: {e}")
