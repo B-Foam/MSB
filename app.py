@@ -1,7 +1,27 @@
 import requests
 import streamlit as st
 from consulta_imagens import render_consulta_imagens
+import streamlit as st
 
+# 1. Inicializa o estado de autenticação
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+# 2. Tela de Login
+def tela_login():
+    st.title("🔒 Acesso Restrito")
+    password = st.text_input("Digite a senha principal:", type="password")
+    if st.button("Entrar"):
+        if password == "BbdYvIBfoam": # A mesma senha que você já usava no expander
+            st.session_state.autenticado = True
+            st.rerun() # Recarrega a página para mostrar o app
+        else:
+            st.error("Senha incorreta!")
+
+# 3. Lógica principal: se não estiver autenticado, mostra o login
+if not st.session_state.autenticado:
+    tela_login()
+else:
 
 def get_image_as_base64(path):
     try:
