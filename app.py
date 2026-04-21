@@ -36,7 +36,7 @@ def salvar_no_drive(arquivo_bytes, nome_arquivo):
         service = build('drive', 'v3', credentials=creds)
         
         # 2. ID da pasta (Substitua pelo ID que você pegou na URL do seu Drive)
-        folder_id = 'https://drive.google.com/drive/u/6/folders/1JhYTZ74AYLu0FZAoaE4mb-nD7IFYAP5i' 
+        folder_id = '1JhYTZ74AYLu0FZAoaE4mb-nD7IFYAP5i' 
         
         # 3. Metadados do arquivo
         file_metadata = {
