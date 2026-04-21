@@ -225,6 +225,24 @@ with st.sidebar:
     st.video("https://youtu.be/hY5K55Ha2pg")
     st.write(f"Tutorial: {st.session_state.get('tipo_selecionado', 'Geral')}")
 
+    st.divider()
+    st.subheader("🔗 Links Úteis")
+    
+    # Links do Drive com ícones e formatação limpa
+    st.markdown("""
+    - 📂 **[Referências](https://drive.google.com/drive/folders/1t0-cqQjqLRbiexGowbBqmmQDoe3RMG2I?usp=sharing)**
+    - 📄 **[Documentos Controlados](https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing)**
+    """, unsafe_allow_html=True)
+
+    if st.session_state.pagina == "selecao":
+        st.divider()
+        st.subheader("🔑 Central de Acessos")
+        with st.expander("Clique aqui para ver acessos"):
+            st.markdown("""
+            **E-mail**: `msbbfoam@gmail.com`  
+            **Senha**: `Bfoam-50`
+            """)
+
 
 # ============================================================
 # TELA PRINCIPAL
