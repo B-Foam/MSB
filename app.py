@@ -1,6 +1,16 @@
 import requests
 import streamlit as st
 
+
+def get_image_as_base64(path):
+    try:
+        with open(path, "rb") as image_file:
+            import base64
+            data = base64.b64encode(image_file.read()).decode()
+        return f"data:image/png;base64,{data}"
+    except Exception:
+        return ""
+        
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
@@ -135,6 +145,46 @@ st.markdown("""
         margin-top: 10px;
         margin-bottom: 10px;
     }
+    
+    .topo-card {
+        background-color: white;
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin: 10px auto 24px auto;
+        max-width: 640px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    }
+
+    .topo-logo {
+        height: 56px;
+        width: auto;
+    }
+
+    .topo-titulo {
+        color: black;
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0;
+        line-height: 1.1;
+    }
+
+    .topo-subtitulo {
+        color: #444;
+        font-size: 0.95rem;
+        margin: 4px 0 0 0;
+    }
+
+    .subtitulo-home {
+        color: #FFD700;
+        font-size: 0.95rem;
+        font-weight: 700;
+        text-align: center;
+        margin: 10px 0 14px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -180,8 +230,20 @@ with st.sidebar:
 # TELA PRINCIPAL
 # ============================================================
 if st.session_state.pagina == "selecao":
+    logo_base64 = get_image_as_base64("logo-msb.png")
+
+    st.markdown(f"""
+    <div class="topo-card">
+        <img src="{logo_base64}" class="topo-logo">
+        <div>
+            <p class="topo-titulo">B-Foam</p>
+            <p class="topo-subtitulo">Engenharia MSB · Plataforma de Análise</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.markdown(
-        '<p class="titulo-amarelo">Selecione o tipo de análise:</p>',
+        '<p class="subtitulo-home">Selecione o tipo de análise desejada:</p>',
         unsafe_allow_html=True
     )
 
