@@ -199,16 +199,22 @@ elif st.session_state.pagina == "cadastro":
                     if not mime_type:
                         mime_type = "image/png" if extensao == "png" else "image/jpeg"
 
-                    with st.spinner("Enviando para o Supabase..."):
-                    # O código abaixo deve estar alinhado à direita do 'with'
+                   # 1. Definimos a variável fora do bloco para garantir que ela exista
+                sucesso = False 
+                
+                # 2. O 'with' garante a animação de carregamento
+                with st.spinner("Enviando para o Supabase..."):
+                    # 3. O código aqui dentro deve ter 4 ou 8 espaços à direita
                     sucesso = salvar_no_supabase(
                         uploaded_file.getvalue(),
                         nome_final,
                         mime_type
                     )
 
-                # Isso aqui deve estar alinhado com o 'with' (fora dele)
+                # 4. O 'if' deve estar alinhado com o 'with', não dentro dele
                 if sucesso:
                     st.success(f"Arquivo salvo com sucesso: {nome_final}")
                 else:
-                    st.error("Falha ao salvar o arquivo.")
+                    st.error("Falha ao salvar o arquivo. Verifique se o nome do bucket está correto e se há permissão de escrita.")
+
+                
