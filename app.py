@@ -23,21 +23,19 @@ def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
     try:
         supabase = get_supabase_client()
 
-        arquivo_stream = io.BytesIO(arquivo_bytes)
-
-        # Versão mais compatível: usar stream + file_options simples
+        # O Supabase espera o conteúdo bruto (bytes) diretamente
+        # Remova o 'arquivo_stream = io.BytesIO(arquivo_bytes)'
+        
         response = supabase.storage.from_(BUCKET_NAME).upload(
             path=nome_arquivo,
-            file=arquivo_stream,
-            file_options={
-                "upsert": "false"
-            }
+            file=arquivo_bytes, # Passe os bytes diretamente aqui
+            file_options={"content-type": mime_type}
         )
 
         return response
 
     except Exception as e:
-        st.error(f"Erro ao salvar no Supabase: {repr(e)}")
+        st.error(f"Erro ao salvar no Supabase: {e}")
         return None
 
 
