@@ -1,7 +1,5 @@
-import os
-import tempfile
+import requests
 import streamlit as st
-from supabase import create_client
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -14,94 +12,45 @@ st.set_page_config(
 BUCKET_NAME = "imbfoam"  # confirme o nome exato do bucket
 
 
-def get_supabase_client():
-    url = st.secrets["supabase"]["SUPABASE_URL"]
-    key = st.secrets["supabase"]["SUPABASE_KEY"]
-    return create_client(url, key)
-
-
-def salvar_no_supabase(uploaded_file, nome_arquivo):
-    temp_path = None
-
+def salvar_no_supabase(uploaded_file, nome_arquivo, mime_type):
     try:
-        supabase = get_supabase_client()
+        base_url = st.secrets["supabase"]["SUPABASE_URL"].rstrip("/")
+        api_key = st.secrets["supabase"]["SUPABASE_KEY"]
 
-        extensao = uploaded_file.name.split(".")[-1].lower()
-        if extensao == "jpg":
-            extensao = "jpeg"
+        url = f"{base_url}/storage/v1/object/{BUCKET_NAME}/{nome_arquivo}"
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extensao}") as tmp:
-            tmp.write(uploaded_file.getbuffer())
-            temp_path = tmp.name
+        headers = {
+            "apikey": api_key,
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": mime_type,
+            "x-upsert": "true",
+        }
 
-        with open(temp_path, "rb") as f:
-            response = supabase.storage.from_(BUCKET_NAME).upload(
-                path=nome_arquivo,
-                file=f,
-                file_options={
-                    "cache-control": "3600",
-                    "upsert": "true"
-                }
-            )
+        response = requests.post(
+            url,
+            headers=headers,
+            data=uploaded_file.getvalue(),
+            timeout=60
+        )
 
-        return True, response
+        if response.ok:
+            return True, response.text
+
+        return False, f"{response.status_code} - {response.text}"
 
     except Exception as e:
         return False, repr(e)
-
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
 
 
 # --- CSS E ESTILIZAÇÃO ---
 st.markdown("""
 <style>
-    #header-container {
-        background-color: white;
-        color: black;
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        text-align: center;
-    }
-
     .titulo-amarelo {
         color: #FFD700;
         font-size: 3.5em;
         font-weight: bold;
         text-align: center;
         margin: 20px 0;
-    }
-
-    .card {
-        background-color: #1E3A5F;
-        padding: 15px;
-        border-radius: 15px;
-        border: 1px solid #2E7BCF;
-        text-align: center;
-        height: 200px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-    }
-
-    .card h3 {
-        color: #FFFFFF;
-        font-size: 1.3em;
-        margin: 0 0 10px 0;
-    }
-
-    .card p {
-        color: #B9D1EA;
-        font-size: 0.8em;
-        margin: 0;
-        line-height: 1.3;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -121,15 +70,6 @@ with st.sidebar:
     st.header("Vídeos de Apoio")
     st.video("https://youtu.be/hY5K55Ha2pg")
     st.write(f"Tutorial: {st.session_state.get('tipo_selecionado', 'Geral')}")
-
-    if st.session_state.pagina == "selecao":
-        st.divider()
-        st.subheader("🔑 Central de Acessos")
-        with st.expander("Clique aqui para ver acessos"):
-            st.markdown("""
-            **E-mail**: `msbbfoam@gmail.com`  
-            **Senha**: `Bfoam-50`
-            """)
 
 # --- CONTEÚDO DAS PÁGINAS ---
 if st.session_state.pagina == "selecao":
@@ -208,11 +148,18 @@ elif st.session_state.pagina == "cadastro":
                         f"{disp_final}.{extensao}"
                     )
 
+                    mime_type = uploaded_file.type
+                    if not mime_type:
+                        mime_type = "image/png" if extensao == "png" else "image/jpeg"
+
                     with st.spinner("Enviando para o Supabase..."):
-                        sucesso, detalhe = salvar_no_supabase(uploaded_file, nome_final)
+                        sucesso, detalhe = salvar_no_supabase(
+                            uploaded_file,
+                            nome_final,
+                            mime_type
+                        )
 
                     if sucesso:
                         st.success(f"Arquivo salvo com sucesso: {nome_final}")
                     else:
                         st.error(f"Erro ao salvar no Supabase: {detalhe}")
-                        st.error("Falha ao salvar o arquivo. Verifique bucket, chave e permissões.")
