@@ -9,6 +9,7 @@ from PIL import Image
 
 
 def baixar_imagem(url):
+    
     response = requests.get(url, timeout=30)
     response.raise_for_status()
     return Image.open(io.BytesIO(response.content)).convert("RGB")
