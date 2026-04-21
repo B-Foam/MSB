@@ -14,8 +14,15 @@ BUCKET_NAME = "imbfoam"  # confirme o nome exato do bucket
 
 def salvar_no_supabase(uploaded_file, nome_arquivo, mime_type):
     try:
-        base_url = st.secrets["supabase"]["SUPABASE_URL"].rstrip("/")
-        api_key = st.secrets["supabase"]["SUPABASE_KEY"]
+        base_url = st.secrets["supabase"]["SUPABASE_URL"].strip().rstrip("/")
+        api_key = st.secrets["supabase"]["SUPABASE_KEY"].strip()
+
+        # proteção contra URL errada no secrets
+        if "/rest/v1" in base_url or "/storage/v1" in base_url:
+            return False, (
+                "SUPABASE_URL inválida. Use apenas o domínio base do projeto, "
+                "ex.: https://seu-projeto.supabase.co"
+            )
 
         url = f"{base_url}/storage/v1/object/{BUCKET_NAME}/{nome_arquivo}"
 
