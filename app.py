@@ -1,3 +1,4 @@
+import io
 import streamlit as st
 from supabase import create_client
 
@@ -9,7 +10,7 @@ st.set_page_config(
 )
 
 # --- CONFIGURAÇÃO DO SUPABASE ---
-BUCKET_NAME = "imbfoam"  # troque aqui se o nome real do bucket for outro
+BUCKET_NAME = "imbfoam"  # confirme se é exatamente este nome
 
 
 def get_supabase_client():
@@ -22,11 +23,13 @@ def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
     try:
         supabase = get_supabase_client()
 
+        arquivo_stream = io.BytesIO(arquivo_bytes)
+
+        # Versão mais compatível: usar stream + file_options simples
         response = supabase.storage.from_(BUCKET_NAME).upload(
             path=nome_arquivo,
-            file=arquivo_bytes,
+            file=arquivo_stream,
             file_options={
-                "content-type": mime_type,
                 "upsert": "false"
             }
         )
@@ -34,7 +37,7 @@ def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
         return response
 
     except Exception as e:
-        st.error(f"Erro ao salvar no Supabase: {e}")
+        st.error(f"Erro ao salvar no Supabase: {repr(e)}")
         return None
 
 
@@ -181,7 +184,6 @@ elif st.session_state.pagina == "cadastro":
                     st.error("Por favor, informe o nome do dispositivo.")
                 else:
                     extensao = uploaded_file.name.split(".")[-1].lower()
-
                     if extensao == "jpg":
                         extensao = "jpeg"
 
@@ -195,10 +197,7 @@ elif st.session_state.pagina == "cadastro":
 
                     mime_type = uploaded_file.type
                     if not mime_type:
-                        if extensao == "png":
-                            mime_type = "image/png"
-                        else:
-                            mime_type = "image/jpeg"
+                        mime_type = "image/png" if extensao == "png" else "image/jpeg"
 
                     with st.spinner("Enviando para o Supabase..."):
                         resposta = salvar_no_supabase(
@@ -207,7 +206,7 @@ elif st.session_state.pagina == "cadastro":
                             mime_type
                         )
 
-                    if resposta:
+                    if resposta is not None:
                         st.success(f"Arquivo salvo com sucesso: {nome_final}")
                     else:
                         st.error("Falha ao salvar o arquivo.")
