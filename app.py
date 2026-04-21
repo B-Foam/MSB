@@ -22,21 +22,23 @@ def get_supabase_client():
 def salvar_no_supabase(arquivo_bytes, nome_arquivo, mime_type):
     try:
         supabase = get_supabase_client()
-
-        # O Supabase espera o conteúdo bruto (bytes) diretamente
-        # Remova o 'arquivo_stream = io.BytesIO(arquivo_bytes)'
         
+        # O Supabase SDK espera os bytes diretamente.
+        # Não use BytesIO aqui.
         response = supabase.storage.from_(BUCKET_NAME).upload(
             path=nome_arquivo,
-            file=arquivo_bytes, # Passe os bytes diretamente aqui
-            file_options={"content-type": mime_type}
+            file=arquivo_bytes,
+            file_options={"content-type": mime_type, "upsert": "true"}
         )
-
-        return response
-
+        
+        # Apenas retorne True se a operação não levantar exceção.
+        # Não tente acessar response.text ou outros atributos.
+        return True
     except Exception as e:
         st.error(f"Erro ao salvar no Supabase: {e}")
-        return None
+        return False
+
+
 
 
 # --- CSS E ESTILIZAÇÃO ---
@@ -198,13 +200,14 @@ elif st.session_state.pagina == "cadastro":
                         mime_type = "image/png" if extensao == "png" else "image/jpeg"
 
                     with st.spinner("Enviando para o Supabase..."):
-                        resposta = salvar_no_supabase(
-                            uploaded_file.getvalue(),
-                            nome_final,
-                            mime_type
-                        )
+    # Chamada da função corrigida que retorna True ou False
+    sucesso = salvar_no_supabase(
+        uploaded_file.getvalue(), # Passa os bytes puros
+        nome_final,
+        mime_type
+    )
 
-                    if resposta is not None:
-                        st.success(f"Arquivo salvo com sucesso: {nome_final}")
-                    else:
-                        st.error("Falha ao salvar o arquivo.")
+if sucesso: # Verifica se foi True
+    st.success(f"Arquivo salvo com sucesso: {nome_final}")
+else:
+    st.error("Falha ao salvar o arquivo. Verifique as permissões do bucket.")
