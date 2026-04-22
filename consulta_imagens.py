@@ -217,7 +217,7 @@ def score_circulo(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
     mean_centro = float(np.mean(crop[centro]))
     mean_externo = float(np.mean(crop[externo]))
 
-    return mean_anel - 0.45 * mean_centro - 0.25 * mean_externo
+    return mean_anel - 0.45 * mean_centro - 0.35 * mean_externo
 
 
 # ============================================================
@@ -235,7 +235,6 @@ def remover_pequenas_dentro_de_grandes(candidatos: List[Dict]) -> List[Dict]:
         for f in finais:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
 
-            # se uma pequena está muito dentro de uma maior, remove
             if c["r"] < 0.55 * f["r"] and dist + c["r"] < 0.82 * f["r"]:
                 manter = False
                 break
@@ -259,7 +258,7 @@ def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
             r_ref = max(c["r"], f["r"])
 
-            if dist < 0.55 * r_ref and abs(c["r"] - f["r"]) < 0.35 * r_ref:
+            if dist < 0.45 * r_ref and abs(c["r"] - f["r"]) < 0.30 * r_ref:
                 manter = False
                 break
 
@@ -288,7 +287,6 @@ def detectar_bolhas_leve(
         px_per_mm_small = px_per_mm * scale
 
         faixas = [
-            # pequenas: menos permissiva
             {
                 "nome": "pequenas",
                 "minR": max(5, int(px_per_mm_small * 0.025)),
@@ -296,7 +294,6 @@ def detectar_bolhas_leve(
                 "minDist": max(8, int(px_per_mm_small * 0.022)),
                 "param2": 15,
             },
-            # médias/grandes: mais favorecida
             {
                 "nome": "medias_grandes",
                 "minR": max(10, int(px_per_mm_small * 0.045)),
@@ -340,7 +337,6 @@ def detectar_bolhas_leve(
 
             score = score_circulo(base, x, y, r)
 
-            # pequenas exigem score maior
             if faixa["nome"] == "pequenas":
                 if score < 5.5:
                     continue
@@ -386,6 +382,52 @@ def desenhar_imagem_roi(
     out = cv2.addWeighted(out, 0.62, overlay, 0.38, 0)
 
     cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
+
+    if barra_info is not None:
+        x, y, ww, hh = barra_info["x"], barra_info["y"], barra_info["w"], barra_info["h"]
+        cv2.rectangle(out, (x, y), (x + ww, y + hh), (0, 255, 0), 2)
+        cv2.line(out, (x, y + hh // 2), (x + ww, y + hh // 2), (0, 255, 0), 2)
+
+    return out
+
+
+def desenhar_bolhas_sobre_original(
+    img_bgr: np.ndarray,
+    roi_info: Dict[str, int],
+    bolhas: List[Dict],
+    barra_info=None,
+) -> np.ndarray:
+    out = img_bgr.copy()
+
+    overlay = out.copy()
+    mask = np.zeros(out.shape[:2], dtype=np.uint8)
+    cv2.circle(mask, (roi_info["cx"], roi_info["cy"]), roi_info["r"], 255, -1)
+    overlay[mask == 0] = (25, 25, 25)
+    out = cv2.addWeighted(out, 0.68, overlay, 0.32, 0)
+
+    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
+
+    rng = np.random.default_rng(123)
+
+    for i, b in enumerate(bolhas, start=1):
+        x = int(round(b["x"]))
+        y = int(round(b["y"]))
+        r = int(round(b["r"]))
+        color = tuple(int(v) for v in rng.integers(30, 256, size=3))
+
+        cv2.circle(out, (x, y), r, color, 2)
+
+        if r >= 11:
+            cv2.putText(
+                out,
+                str(i),
+                (x - int(r * 0.25), y + int(r * 0.10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
 
     if barra_info is not None:
         x, y, ww, hh = barra_info["x"], barra_info["y"], barra_info["w"], barra_info["h"]
@@ -541,6 +583,13 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                     px_per_mm=px_per_mm,
                 )
 
+                img_overlay = desenhar_bolhas_sobre_original(
+                    img_bgr=img_bgr,
+                    roi_info=roi_info,
+                    bolhas=bolhas,
+                    barra_info=barra_info,
+                )
+
                 img_final = desenhar_bolhas_coloridas(
                     shape=img_bgr.shape,
                     roi_info=roi_info,
@@ -548,6 +597,10 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                     barra_info=barra_info,
                 )
 
-                st.markdown("### Imagem 2 — bolhas detectadas")
+                st.markdown("### Imagem 2 — bolhas sobre a imagem original")
+                st.image(cv_to_pil(img_overlay), use_container_width=True)
+
+                st.markdown("### Imagem 3 — mapa colorido das bolhas detectadas")
                 st.image(cv_to_pil(img_final), use_container_width=True)
+
                 st.info(f"Bolhas detectadas: {len(bolhas)}")
