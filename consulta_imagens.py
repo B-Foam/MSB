@@ -156,7 +156,7 @@ def ponto_totalmente_dentro_roi(x: float, y: float, r: float, roi_info: Dict[str
 def preprocessar_variantes(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=2.6, tileGridSize=(8, 8))
     img_clahe = clahe.apply(gray)
 
     bilateral = cv2.bilateralFilter(img_clahe, 9, 75, 75)
@@ -164,19 +164,29 @@ def preprocessar_variantes(img_bgr: np.ndarray, mask_roi: np.ndarray):
     blur = cv2.GaussianBlur(bilateral, (0, 0), 1.2)
     sharpen = cv2.addWeighted(bilateral, 1.45, blur, -0.45, 0)
 
+    # bordas locais
     grad = cv2.morphologyEx(
         sharpen,
         cv2.MORPH_GRADIENT,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
     )
 
+    # diferença de gaussianas
     dog = cv2.absdiff(
         cv2.GaussianBlur(sharpen, (0, 0), 1.0),
-        cv2.GaussianBlur(sharpen, (0, 0), 2.6),
+        cv2.GaussianBlur(sharpen, (0, 0), 2.8),
+    )
+
+    # black-hat pequeno para realçar anéis escuros
+    blackhat = cv2.morphologyEx(
+        sharpen,
+        cv2.MORPH_BLACKHAT,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
     )
 
     grad = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     variantes = {
         "gray": gray,
@@ -185,6 +195,7 @@ def preprocessar_variantes(img_bgr: np.ndarray, mask_roi: np.ndarray):
         "sharpen": sharpen,
         "grad": grad,
         "dog": dog,
+        "blackhat": blackhat,
     }
 
     for k in variantes:
@@ -194,11 +205,10 @@ def preprocessar_variantes(img_bgr: np.ndarray, mask_roi: np.ndarray):
 
     return variantes
 
-
 # ============================================================
 # SCORE DO CÍRCULO
 # ============================================================
-def score_circulo_borda(grad_img: np.ndarray, x: float, y: float, r: float) -> float:
+def score_circulo_borda(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
     x = int(round(x))
     y = int(round(y))
     r = int(round(r))
@@ -206,17 +216,21 @@ def score_circulo_borda(grad_img: np.ndarray, x: float, y: float, r: float) -> f
     if r < 3:
         return 0.0
 
-    h, w = grad_img.shape[:2]
-    r2 = int(max(4, r * 1.15))
-    r1 = int(max(2, r * 0.78))
-    inner_r = int(max(1, r * 0.55))
+    h, w = ref_img.shape[:2]
 
-    x0 = max(0, x - r2 - 2)
-    x1 = min(w, x + r2 + 3)
-    y0 = max(0, y - r2 - 2)
-    y1 = min(h, y + r2 + 3)
+    r_inner = max(1, int(r * 0.55))
+    r_ring1 = max(2, int(r * 0.82))
+    r_ring2 = max(r_ring1 + 1, int(r * 1.15))
+    r_outer1 = max(r_ring2 + 1, int(r * 1.20))
+    r_outer2 = max(r_outer1 + 1, int(r * 1.45))
 
-    crop = grad_img[y0:y1, x0:x1]
+    pad = r_outer2 + 3
+    x0 = max(0, x - pad)
+    x1 = min(w, x + pad + 1)
+    y0 = max(0, y - pad)
+    y1 = min(h, y + pad + 1)
+
+    crop = ref_img[y0:y1, x0:x1]
     if crop.size == 0:
         return 0.0
 
@@ -225,16 +239,20 @@ def score_circulo_borda(grad_img: np.ndarray, x: float, y: float, r: float) -> f
     yy = yy + y0
     dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
 
-    anel = (dist >= r1) & (dist <= r2)
-    centro = dist <= inner_r
+    centro = dist <= r_inner
+    anel = (dist >= r_ring1) & (dist <= r_ring2)
+    externo = (dist >= r_outer1) & (dist <= r_outer2)
 
-    if np.count_nonzero(anel) == 0 or np.count_nonzero(centro) == 0:
+    if np.count_nonzero(anel) < 10 or np.count_nonzero(centro) < 10 or np.count_nonzero(externo) < 10:
         return 0.0
 
-    mean_anel = float(np.mean(crop[anel]))
     mean_centro = float(np.mean(crop[centro]))
+    mean_anel = float(np.mean(crop[anel]))
+    mean_externo = float(np.mean(crop[externo]))
 
-    return mean_anel - 0.35 * mean_centro
+    # score favorece anel forte e contraste com centro + externo
+    score = mean_anel - 0.45 * mean_centro - 0.35 * mean_externo
+    return float(score)
 
 
 # ============================================================
@@ -244,76 +262,28 @@ def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
     if not candidatos:
         return []
 
-    grupos = []
-
-    # ordenar por score
     candidatos = sorted(candidatos, key=lambda c: c["score"], reverse=True)
+    finais = []
 
     for c in candidatos:
-        encaixou = False
-        for g in grupos:
-            dist = math.hypot(c["x"] - g["x"], c["y"] - g["y"])
-            limite_dist = max(5.0, 0.35 * (c["r"] + g["r"]))
-            limite_raio = max(3.0, 0.30 * max(c["r"], g["r"]))
+        manter = True
+        for f in finais:
+            dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
+            r_ref = max(c["r"], f["r"])
 
-            if dist <= limite_dist and abs(c["r"] - g["r"]) <= limite_raio:
-                g["xs"].append(c["x"])
-                g["ys"].append(c["y"])
-                g["rs"].append(c["r"])
-                g["scores"].append(c["score"])
-                g["votes"] += 1
-                encaixou = True
+            if dist < 0.45 * r_ref and abs(c["r"] - f["r"]) < 0.35 * r_ref:
+                manter = False
                 break
 
-        if not encaixou:
-            grupos.append(
-                {
-                    "x": c["x"],
-                    "y": c["y"],
-                    "r": c["r"],
-                    "xs": [c["x"]],
-                    "ys": [c["y"]],
-                    "rs": [c["r"]],
-                    "scores": [c["score"]],
-                    "votes": 1,
-                }
-            )
+        if manter:
+            finais.append(c)
 
-    finais = []
-    for g in grupos:
-        score_medio = float(np.mean(g["scores"]))
-        vote_count = int(g["votes"])
+    # mantém os melhores
+    finais = sorted(finais, key=lambda c: c["score"], reverse=True)
 
-        # filtro mais tolerante para trazer mais círculos
-        if vote_count >= 2 or score_medio >= 12:
-            finais.append(
-                {
-                    "x": float(np.mean(g["xs"])),
-                    "y": float(np.mean(g["ys"])),
-                    "r": float(np.mean(g["rs"])),
-                    "score": score_medio,
-                    "votes": vote_count,
-                }
-            )
+    if len(finais) > 1400:
+        finais = finais[:1400]
 
-    # se vier muito pouco, relaxa
-    if len(finais) < 20:
-        finais = []
-        for g in grupos:
-            score_medio = float(np.mean(g["scores"]))
-            finais.append(
-                {
-                    "x": float(np.mean(g["xs"])),
-                    "y": float(np.mean(g["ys"])),
-                    "r": float(np.mean(g["rs"])),
-                    "score": score_medio,
-                    "votes": int(g["votes"]),
-                }
-            )
-        finais = [c for c in finais if c["score"] >= 7]
-
-    # ordenar do maior score para o menor
-    finais = sorted(finais, key=lambda c: (c["votes"], c["score"]), reverse=True)
     return finais
 
 
@@ -327,30 +297,33 @@ def detectar_bolhas_multiescala(
     px_per_mm: Optional[float],
 ):
     variantes = preprocessar_variantes(img_bgr, mask_roi)
-    grad_ref = variantes["grad"]
+
+    # imagem de referência para score
+    ref_score = cv2.addWeighted(variantes["grad"], 0.45, variantes["blackhat"], 0.55, 0)
 
     candidatos = []
 
-    # faixas de raio em pixels
     if px_per_mm and px_per_mm > 0:
         faixas = [
-            {"minR": max(4, int(px_per_mm * 0.010)), "maxR": max(10, int(px_per_mm * 0.030)), "minDist": max(7, int(px_per_mm * 0.018)), "param2": 10},
-            {"minR": max(8, int(px_per_mm * 0.025)), "maxR": max(24, int(px_per_mm * 0.070)), "minDist": max(10, int(px_per_mm * 0.028)), "param2": 12},
-            {"minR": max(20, int(px_per_mm * 0.060)), "maxR": max(70, int(px_per_mm * 0.180)), "minDist": max(16, int(px_per_mm * 0.050)), "param2": 15},
+            {"nome": "micro",   "minR": max(3, int(px_per_mm * 0.006)), "maxR": max(7,  int(px_per_mm * 0.018)), "minDist": max(5,  int(px_per_mm * 0.010)), "param2": 8},
+            {"nome": "pequena", "minR": max(6, int(px_per_mm * 0.016)), "maxR": max(12, int(px_per_mm * 0.032)), "minDist": max(7,  int(px_per_mm * 0.016)), "param2": 10},
+            {"nome": "media",   "minR": max(10, int(px_per_mm * 0.030)), "maxR": max(26, int(px_per_mm * 0.075)), "minDist": max(10, int(px_per_mm * 0.024)), "param2": 12},
+            {"nome": "grande",  "minR": max(22, int(px_per_mm * 0.070)), "maxR": max(75, int(px_per_mm * 0.200)), "minDist": max(16, int(px_per_mm * 0.050)), "param2": 14},
         ]
     else:
         faixas = [
-            {"minR": 4, "maxR": 12, "minDist": 8, "param2": 10},
-            {"minR": 8, "maxR": 28, "minDist": 10, "param2": 12},
-            {"minR": 22, "maxR": 80, "minDist": 18, "param2": 15},
+            {"nome": "micro",   "minR": 3,  "maxR": 7,  "minDist": 5,  "param2": 8},
+            {"nome": "pequena", "minR": 6,  "maxR": 12, "minDist": 7,  "param2": 10},
+            {"nome": "media",   "minR": 10, "maxR": 26, "minDist": 10, "param2": 12},
+            {"nome": "grande",  "minR": 22, "maxR": 75, "minDist": 16, "param2": 14},
         ]
 
-    # imagens-base para Hough
     bases = [
         variantes["clahe"],
         variantes["bilateral"],
         variantes["sharpen"],
         variantes["dog"],
+        variantes["blackhat"],
     ]
 
     for base in bases:
@@ -358,9 +331,9 @@ def detectar_bolhas_multiescala(
             circles = cv2.HoughCircles(
                 base,
                 cv2.HOUGH_GRADIENT,
-                dp=1.15,
+                dp=1.10,
                 minDist=faixa["minDist"],
-                param1=100,
+                param1=90,
                 param2=faixa["param2"],
                 minRadius=faixa["minR"],
                 maxRadius=faixa["maxR"],
@@ -377,8 +350,11 @@ def detectar_bolhas_multiescala(
                 if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
                     continue
 
-                score = score_circulo_borda(grad_ref, x, y, r)
-                if score < 5:
+                # score mais estável
+                score = score_circulo_borda(ref_score, x, y, r)
+
+                # corte mais suave para não matar bolhas reais
+                if score < 4.5:
                     continue
 
                 candidatos.append(
@@ -392,12 +368,13 @@ def detectar_bolhas_multiescala(
 
     bolhas = fundir_candidatos(candidatos)
 
-    # cortar excesso extremo, se necessário
-    if len(bolhas) > 1200:
-        bolhas = bolhas[:1200]
+    # segunda peneira leve: remove círculos muito fracos
+    if len(bolhas) > 0:
+        scores = np.array([b["score"] for b in bolhas], dtype=float)
+        limiar = max(5.0, float(np.percentile(scores, 15)))
+        bolhas = [b for b in bolhas if b["score"] >= limiar]
 
     return bolhas
-
 
 # ============================================================
 # DESENHOS
