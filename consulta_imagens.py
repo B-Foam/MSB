@@ -114,11 +114,9 @@ def criar_mascara_roi(shape, roi_info: Dict[str, int], barra_info=None):
 
     cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
 
-    # remove faixa superior
     topo = int(h * 0.045)
     mask[:topo, :] = 0
 
-    # remove área da barra
     if barra_info is not None:
         x, y, ww, hh = barra_info["x"], barra_info["y"], barra_info["w"], barra_info["h"]
         x_ini = max(0, x - 20)
@@ -143,22 +141,26 @@ def preprocessar_leve(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray[mask_roi == 0] = 0
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
+    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+    clahe_img = clahe.apply(gray)
 
-    # filtro leve
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    bilateral = cv2.bilateralFilter(clahe_img, 7, 60, 60)
 
-    # black-hat simples
     blackhat = cv2.morphologyEx(
-        gray,
+        bilateral,
         cv2.MORPH_BLACKHAT,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
     )
     blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    _, mask = cv2.threshold(blackhat, 28, 255, cv2.THRESH_BINARY)
+    mask[mask_roi == 0] = 0
     blackhat[mask_roi == 0] = 0
 
-    return blackhat
+    return {
+        "blackhat": blackhat,
+        "mask": mask,
+    }
 
 
 # ============================================================
@@ -183,13 +185,55 @@ def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale:
 
 
 # ============================================================
-# FUSÃO
+# SCORE SIMPLES MAIS RÍGIDO
 # ============================================================
-def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
+def score_circulo_rapido(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
+    x = int(round(x))
+    y = int(round(y))
+    r = int(round(r))
+
+    if r < 4:
+        return 0.0
+
+    h, w = ref_img.shape[:2]
+    pad = int(r * 1.5) + 3
+
+    x0 = max(0, x - pad)
+    x1 = min(w, x + pad + 1)
+    y0 = max(0, y - pad)
+    y1 = min(h, y + pad + 1)
+
+    crop = ref_img[y0:y1, x0:x1]
+    if crop.size == 0:
+        return 0.0
+
+    yy, xx = np.indices(crop.shape)
+    xx = xx + x0
+    yy = yy + y0
+    dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
+
+    centro = dist <= int(r * 0.55)
+    anel = (dist >= int(r * 0.82)) & (dist <= int(r * 1.12))
+    externo = (dist >= int(r * 1.18)) & (dist <= int(r * 1.45))
+
+    if np.count_nonzero(anel) < 10 or np.count_nonzero(centro) < 10 or np.count_nonzero(externo) < 10:
+        return 0.0
+
+    mean_anel = float(np.mean(crop[anel]))
+    mean_centro = float(np.mean(crop[centro]))
+    mean_externo = float(np.mean(crop[externo]))
+
+    return mean_anel - 0.45 * mean_centro - 0.25 * mean_externo
+
+
+# ============================================================
+# FUSÃO MAIS RÍGIDA
+# ============================================================
+def fundir_candidatos_rapido(candidatos: List[Dict]) -> List[Dict]:
     if not candidatos:
         return []
 
-    candidatos = sorted(candidatos, key=lambda c: c["r"], reverse=True)
+    candidatos = sorted(candidatos, key=lambda c: (c["score"], c["r"]), reverse=True)
     finais = []
 
     for c in candidatos:
@@ -197,17 +241,22 @@ def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
         for f in finais:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
             r_ref = max(c["r"], f["r"])
-            if dist < 0.32 * r_ref and abs(c["r"] - f["r"]) < 0.25 * r_ref:
+
+            if dist < 0.55 * r_ref and abs(c["r"] - f["r"]) < 0.35 * r_ref:
                 manter = False
                 break
+
         if manter:
             finais.append(c)
+
+    if len(finais) > 1500:
+        finais = finais[:1500]
 
     return finais
 
 
 # ============================================================
-# DETECÇÃO LEVE
+# DETECÇÃO LEVE AJUSTADA
 # ============================================================
 def detectar_bolhas_leve(
     img_bgr: np.ndarray,
@@ -215,7 +264,7 @@ def detectar_bolhas_leve(
     mask_roi: np.ndarray,
     px_per_mm: Optional[float],
 ):
-    base = preprocessar_leve(img_bgr, mask_roi)
+    base = preprocessar_leve(img_bgr, mask_roi)["blackhat"]
 
     crop, (x0, y0), scale = recortar_roi_para_deteccao(base, roi_info, scale=0.45)
 
@@ -223,24 +272,27 @@ def detectar_bolhas_leve(
 
     if px_per_mm and px_per_mm > 0:
         px_per_mm_small = px_per_mm * scale
+
         faixas = [
             {
-                "minR": max(3, int(px_per_mm_small * 0.012)),
+                "nome": "pequenas",
+                "minR": max(4, int(px_per_mm_small * 0.018)),
                 "maxR": max(10, int(px_per_mm_small * 0.040)),
-                "minDist": max(5, int(px_per_mm_small * 0.015)),
-                "param2": 8,
+                "minDist": max(6, int(px_per_mm_small * 0.018)),
+                "param2": 12,
             },
             {
-                "minR": max(10, int(px_per_mm_small * 0.035)),
-                "maxR": max(42, int(px_per_mm_small * 0.140)),
-                "minDist": max(8, int(px_per_mm_small * 0.025)),
-                "param2": 10,
+                "nome": "medias_grandes",
+                "minR": max(10, int(px_per_mm_small * 0.040)),
+                "maxR": max(42, int(px_per_mm_small * 0.150)),
+                "minDist": max(10, int(px_per_mm_small * 0.030)),
+                "param2": 15,
             },
         ]
     else:
         faixas = [
-            {"minR": 3, "maxR": 10, "minDist": 5, "param2": 8},
-            {"minR": 10, "maxR": 42, "minDist": 8, "param2": 10},
+            {"nome": "pequenas", "minR": 4, "maxR": 10, "minDist": 6, "param2": 12},
+            {"nome": "medias_grandes", "minR": 10, "maxR": 42, "minDist": 10, "param2": 15},
         ]
 
     for faixa in faixas:
@@ -249,7 +301,7 @@ def detectar_bolhas_leve(
             cv2.HOUGH_GRADIENT,
             dp=1.2,
             minDist=faixa["minDist"],
-            param1=80,
+            param1=90,
             param2=faixa["param2"],
             minRadius=faixa["minR"],
             maxRadius=faixa["maxR"],
@@ -270,15 +322,28 @@ def detectar_bolhas_leve(
             if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
                 continue
 
+            score = score_circulo_rapido(base, x, y, r)
+
+            if score < 4.5:
+                continue
+
             candidatos.append(
                 {
                     "x": float(x),
                     "y": float(y),
                     "r": float(r),
+                    "score": float(score),
                 }
             )
 
-    return fundir_candidatos(candidatos)
+    bolhas = fundir_candidatos_rapido(candidatos)
+
+    if len(bolhas) > 0:
+        scores = np.array([b["score"] for b in bolhas], dtype=float)
+        limiar = max(5.0, float(np.percentile(scores, 20)))
+        bolhas = [b for b in bolhas if b["score"] >= limiar]
+
+    return bolhas
 
 
 # ============================================================
