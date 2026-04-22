@@ -38,7 +38,7 @@ def cv_to_pil(img_cv: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
 
 
-def reduzir_imagem_bytes(img_pil: Image.Image, max_width: int = 1024, fmt: str = "PNG") -> Tuple[bytes, str]:
+def reduzir_imagem_bytes(img_pil: Image.Image, max_width: int = 768, fmt: str = "PNG") -> Tuple[bytes, str]:
     img = img_pil.copy()
     w, h = img.size
 
@@ -222,6 +222,24 @@ def coletar_feedback():
 
 
 # ============================================================
+# CACHE POR IMAGEM
+# ============================================================
+def garantir_cache(session_state):
+    if "openai_results_by_image" not in session_state:
+        session_state.openai_results_by_image = {}
+
+
+def obter_resultado_cache(session_state, image_name: str):
+    garantir_cache(session_state)
+    return session_state.openai_results_by_image.get(image_name)
+
+
+def salvar_resultado_cache(session_state, image_name: str, result: Dict[str, Any]):
+    garantir_cache(session_state)
+    session_state.openai_results_by_image[image_name] = result
+
+
+# ============================================================
 # EXECUÇÃO DE ANÁLISE
 # ============================================================
 def executar_pipeline_resultado(result, img_bgr, barra_px_auto):
@@ -249,6 +267,8 @@ def executar_pipeline_resultado(result, img_bgr, barra_px_auto):
 # TELA PRINCIPAL
 # ============================================================
 def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
+    garantir_cache(session_state)
+
     with st.container(border=True):
         st.markdown("## Consulta de imagens com OpenAI API + feedback")
 
@@ -279,45 +299,30 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         img_pil = baixar_imagem(url_imagem)
         img_bgr = pil_to_cv(img_pil)
 
-        # Reduz a imagem antes de enviar para economizar tokens / chance de 429
-        img_bytes, mime_type = reduzir_imagem_bytes(img_pil, max_width=1024, fmt="PNG")
+        # largura reduzida para 768 px
+        img_bytes, mime_type = reduzir_imagem_bytes(img_pil, max_width=768, fmt="PNG")
 
         barra_px_auto, img_calibracao, _ = detectar_barra_escala_px(img_bgr)
 
-        c1, c2 = st.columns(2)
+        resultado_cache = obter_resultado_cache(session_state, escolhido)
+
+        c1, c2, c3 = st.columns(3)
+
         with c1:
             if st.button("Análise inicial com OpenAI", key="btn_openai_analisar"):
-                try:
-                    with st.spinner("Enviando imagem para a OpenAI API..."):
-                        session_state.openai_result = analyze_bubbles_with_openai(
-                            api_key=api_key,
-                            image_bytes=img_bytes,
-                            mime_type=mime_type,
-                            model=model_name,
-                        )
-                except RateLimitError:
-                    st.error(
-                        "A OpenAI API atingiu o limite de requisições/tokens no momento. "
-                        "Espere um pouco e tente novamente."
-                    )
-                    return
-
-        with c2:
-            if st.button("Revisar com feedback", key="btn_openai_revisar"):
-                if "openai_result" not in session_state:
-                    st.warning("Faça primeiro a análise inicial.")
+                if resultado_cache is not None:
+                    st.info("Esta imagem já possui análise salva no cache desta sessão.")
                 else:
-                    feedback = coletar_feedback()
                     try:
-                        with st.spinner("Enviando feedback para revisão da OpenAI..."):
-                            session_state.openai_result = revise_bubbles_with_feedback(
+                        with st.spinner("Enviando imagem para a OpenAI API..."):
+                            result = analyze_bubbles_with_openai(
                                 api_key=api_key,
                                 image_bytes=img_bytes,
-                                previous_result=session_state.openai_result,
-                                feedback=feedback,
                                 mime_type=mime_type,
                                 model=model_name,
                             )
+                            salvar_resultado_cache(session_state, escolhido, result)
+                            resultado_cache = result
                     except RateLimitError:
                         st.error(
                             "A OpenAI API atingiu o limite de requisições/tokens no momento. "
@@ -325,78 +330,108 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                         )
                         return
 
-        if "openai_result" not in session_state:
+        with c2:
+            if st.button("Recarregar análise salva", key="btn_recarregar_cache"):
+                resultado_cache = obter_resultado_cache(session_state, escolhido)
+                if resultado_cache is None:
+                    st.warning("Ainda não existe análise salva para esta imagem nesta sessão.")
+                else:
+                    st.success("Análise carregada do cache da sessão.")
+
+        with c3:
+            if st.button("Limpar análise salva", key="btn_limpar_cache"):
+                if escolhido in session_state.openai_results_by_image:
+                    del session_state.openai_results_by_image[escolhido]
+                    st.success("Análise removida do cache da sessão.")
+                    st.rerun()
+
+        resultado_cache = obter_resultado_cache(session_state, escolhido)
+
+        if resultado_cache is None:
             st.info("Execute a análise inicial para ver o resultado.")
             return
 
-        try:
-            result = session_state.openai_result
+        result = resultado_cache
 
-            bubbles_raw, bubbles, px_per_mm, df, img_marked = executar_pipeline_resultado(
-                result, img_bgr, barra_px_auto
-            )
+        bubbles_raw, bubbles, px_per_mm, df, img_marked = executar_pipeline_resultado(
+            result, img_bgr, barra_px_auto
+        )
 
-            st.markdown("## Calibração")
-            if barra_px_auto:
-                st.success(f"Barra detectada localmente: {barra_px_auto:.2f} px")
-            elif px_per_mm:
-                st.info(f"Barra estimada pela IA: {float(px_per_mm):.2f} px")
-            else:
-                st.warning("Não foi possível calibrar a escala automaticamente.")
+        st.markdown("## Calibração")
+        if barra_px_auto:
+            st.success(f"Barra detectada localmente: {barra_px_auto:.2f} px")
+        elif px_per_mm:
+            st.info(f"Barra estimada pela IA: {float(px_per_mm):.2f} px")
+        else:
+            st.warning("Não foi possível calibrar a escala automaticamente.")
 
-            st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm", width=420)
+        st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm", width=420)
 
-            st.markdown("## Imagem marcada pela IA")
-            st.image(cv_to_pil(img_marked), width=900)
+        st.markdown("## Imagem marcada pela IA")
+        st.image(cv_to_pil(img_marked), width=900)
 
-            st.markdown("## JSON bruto retornado pela IA")
-            with st.expander("Ver JSON"):
-                st.code(json.dumps(result, indent=2, ensure_ascii=False), language="json")
+        st.markdown("## JSON bruto retornado pela IA")
+        with st.expander("Ver JSON"):
+            st.code(json.dumps(result, indent=2, ensure_ascii=False), language="json")
 
-            st.markdown("## Resumo textual da IA")
-            st.write(result.get("image_summary", ""))
+        st.markdown("## Resumo textual da IA")
+        st.write(result.get("image_summary", ""))
 
-            st.markdown("## Diagnóstico")
-            c1, c2 = st.columns(2)
-            c1.metric("Bolhas retornadas pela IA", len(bubbles_raw))
-            c2.metric("Bolhas após filtros", len(bubbles))
+        st.markdown("## Diagnóstico")
+        c1, c2 = st.columns(2)
+        c1.metric("Bolhas retornadas pela IA", len(bubbles_raw))
+        c2.metric("Bolhas após filtros", len(bubbles))
 
-            feedback = coletar_feedback()
+        feedback = coletar_feedback()
 
-            if df.empty:
-                st.warning("A IA não retornou bolhas válidas com os filtros atuais.")
+        # revisão só é permitida se já existir análise salva
+        if st.button("Revisar com feedback", key="btn_openai_revisar"):
+            try:
+                with st.spinner("Enviando feedback para revisão da OpenAI..."):
+                    revised = revise_bubbles_with_feedback(
+                        api_key=api_key,
+                        image_bytes=img_bytes,
+                        previous_result=result,
+                        feedback=feedback,
+                        mime_type=mime_type,
+                        model=model_name,
+                    )
+                    salvar_resultado_cache(session_state, escolhido, revised)
+                    st.success("Resultado revisado e salvo no cache.")
+                    st.rerun()
+            except RateLimitError:
+                st.error(
+                    "A OpenAI API atingiu o limite de requisições/tokens no momento. "
+                    "Espere um pouco e tente novamente."
+                )
                 return
 
-            st.markdown("## Tabela")
-            st.dataframe(df, use_container_width=True)
+        if df.empty:
+            st.warning("A IA não retornou bolhas válidas com os filtros atuais.")
+            return
 
-            if "Diâmetro (µm)" in df.columns and not df["Diâmetro (µm)"].dropna().empty:
-                maiores_500 = df[df["Diâmetro (µm)"] > 500]
-                pct_500 = 100.0 * len(maiores_500) / len(df)
+        st.markdown("## Tabela")
+        st.dataframe(df, use_container_width=True)
 
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Bolhas totais", len(df))
-                s2.metric("Bolhas > 500 µm", len(maiores_500))
-                s3.metric("% > 500 µm", f"{pct_500:.2f}%")
-                s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+        if "Diâmetro (µm)" in df.columns and not df["Diâmetro (µm)"].dropna().empty:
+            maiores_500 = df[df["Diâmetro (µm)"] > 500]
+            pct_500 = 100.0 * len(maiores_500) / len(df)
 
-                e1, e2 = st.columns(2)
-                e1.metric("Mediana (µm)", f"{df['Diâmetro (µm)'].median():.2f}")
-                e2.metric("Máximo (µm)", f"{df['Diâmetro (µm)'].max():.2f}")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Bolhas totais", len(df))
+            s2.metric("Bolhas > 500 µm", len(maiores_500))
+            s3.metric("% > 500 µm", f"{pct_500:.2f}%")
+            s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
 
-                fig_bar, fig_curve, tabela = plotar_distribuicao(df)
-                if fig_bar is not None:
-                    st.markdown("## Distribuição granulométrica")
-                    st.pyplot(fig_bar)
-                    st.markdown("## Curva")
-                    st.pyplot(fig_curve)
-                    st.markdown("## Quantidade por faixa")
-                    st.dataframe(tabela, use_container_width=True)
+            e1, e2 = st.columns(2)
+            e1.metric("Mediana (µm)", f"{df['Diâmetro (µm)'].median():.2f}")
+            e2.metric("Máximo (µm)", f"{df['Diâmetro (µm)'].max():.2f}")
 
-        except RateLimitError:
-            st.error(
-                "A OpenAI API atingiu o limite de requisições/tokens no momento. "
-                "Espere um pouco e tente novamente."
-            )
-        except Exception as e:
-            st.error(f"Erro ao analisar a imagem: {e}")
+            fig_bar, fig_curve, tabela = plotar_distribuicao(df)
+            if fig_bar is not None:
+                st.markdown("## Distribuição granulométrica")
+                st.pyplot(fig_bar)
+                st.markdown("## Curva")
+                st.pyplot(fig_curve)
+                st.markdown("## Quantidade por faixa")
+                st.dataframe(tabela, use_container_width=True)
