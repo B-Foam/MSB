@@ -5,3 +5,4 @@ numpy
 pandas
 matplotlib
 opencv-python-headless
+openai>=1.0.0
