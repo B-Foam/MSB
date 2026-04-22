@@ -1,8 +1,9 @@
 import base64
 import json
+import time
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 
 def image_url_to_data_url(image_bytes: bytes, mime_type: str = "image/png") -> str:
@@ -43,33 +44,55 @@ def _create_response(
     model: str,
     prompt: str,
     data_url: str,
+    max_attempts: int = 5,
 ) -> Dict[str, Any]:
-    response = client.responses.create(
-        model=model,
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": data_url},
+    """
+    Faz a chamada à Responses API com retry adicional para 429.
+    O SDK Python já faz retries automáticos em alguns casos, inclusive 429,
+    mas aqui adicionamos uma camada extra por segurança.
+    """
+    delays = [2, 5, 10, 20, 30]
+    last_err: Optional[Exception] = None
+
+    for attempt in range(max_attempts):
+        try:
+            response = client.responses.create(
+                model=model,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {"type": "input_image", "image_url": data_url},
+                        ],
+                    }
                 ],
-            }
-        ],
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "bubble_detection",
-                "schema": build_bubble_schema(),
-                "strict": True,
-            }
-        },
-    )
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "bubble_detection",
+                        "schema": build_bubble_schema(),
+                        "strict": True,
+                    }
+                },
+            )
 
-    raw_text = getattr(response, "output_text", None)
-    if not raw_text:
-        raise ValueError("A resposta da API veio sem output_text.")
+            raw_text = getattr(response, "output_text", None)
+            if not raw_text:
+                raise ValueError("A resposta da API veio sem output_text.")
 
-    return json.loads(raw_text)
+            return json.loads(raw_text)
+
+        except RateLimitError as e:
+            last_err = e
+            if attempt >= len(delays):
+                break
+            time.sleep(delays[attempt])
+
+    if last_err is not None:
+        raise last_err
+
+    raise RuntimeError("Falha inesperada ao chamar a OpenAI API.")
 
 
 def analyze_bubbles_with_openai(
