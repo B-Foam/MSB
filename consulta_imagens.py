@@ -1,7 +1,6 @@
 import os
 import math
 import random
-from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import cv2
@@ -35,14 +34,6 @@ def _basename(path: str) -> str:
 
 
 def normalizar_lista_imagens(lista_bruta) -> List[Dict]:
-    """
-    Aceita diferentes formatos vindos da listagem:
-    - ["img1.jpg", "img2.jpg"]
-    - [{"name": "img1.jpg", "path": "pasta/img1.jpg"}]
-    - [{"nome": "...", "caminho": "..."}]
-    - [{"path": "..."}]
-    - [{"url": "..."}]
-    """
     itens = []
 
     if not lista_bruta:
@@ -99,7 +90,7 @@ def normalizar_lista_imagens(lista_bruta) -> List[Dict]:
 
 def gerar_cores_bgr() -> List[Tuple[int, int, int]]:
     random.seed(123)
-    cores = [
+    return [
         (255, 80, 80), (80, 255, 80), (80, 80, 255),
         (255, 200, 80), (255, 80, 200), (80, 255, 255),
         (180, 80, 255), (255, 255, 80), (80, 180, 255),
@@ -107,7 +98,6 @@ def gerar_cores_bgr() -> List[Tuple[int, int, int]]:
         (255, 120, 170), (120, 255, 220), (220, 220, 220),
         (255, 0, 120), (0, 220, 120), (50, 120, 255),
     ]
-    return cores
 
 
 CORES_BOLHAS = gerar_cores_bgr()
@@ -146,19 +136,18 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
     h, w = img_bgr.shape[:2]
 
     x0 = 0
-    y0 = int(h * 0.72)
-    x1 = int(w * 0.40)
+    y0 = int(h * 0.78)
+    x1 = int(w * 0.28)
     y1 = h
 
     roi = img_bgr[y0:y1, x0:x1].copy()
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-    # procurar elementos escuros
-    th = cv2.threshold(gray, 70, 255, cv2.THRESH_BINARY_INV)[1]
+    th = cv2.threshold(gray, 110, 255, cv2.THRESH_BINARY_INV)[1]
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2)
+    kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 1))
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel_h, iterations=1)
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel_h, iterations=2)
 
     cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -167,19 +156,16 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
 
     for c in cnts:
         x, y, ww, hh = cv2.boundingRect(c)
-        area = ww * hh
-        if area < 30:
+
+        if ww < 35:
             continue
-        if ww < 30:
-            continue
-        if hh > 18:
+        if hh > 8:
             continue
 
         ratio = ww / max(hh, 1)
-        if ratio < 4.0:
+        if ratio < 6:
             continue
 
-        # prioriza linhas mais longas
         if ww > melhor_comp:
             melhor_comp = ww
             melhor = (x, y, ww, hh)
@@ -196,6 +182,7 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
         "y2": y0 + y + hh // 2,
         "px_per_mm": float(ww),
     }
+
 
 # ============================================================
 # DESENHO DAS IMAGENS
@@ -240,6 +227,7 @@ def desenhar_roi_e_calibracao(
 
     return out
 
+
 def desenhar_bolhas_detectadas(
     img_bgr: np.ndarray,
     roi_info: Dict[str, int],
@@ -267,7 +255,6 @@ def desenhar_bolhas_detectadas(
         x = int(round(b["x"]))
         y = int(round(b["y"]))
         r = int(round(b["r"]))
-
         esp = 2 if r < 18 else 3
         cv2.circle(out, (x, y), r, cor, esp, lineType=cv2.LINE_AA)
 
@@ -280,7 +267,7 @@ def desenhar_bolhas_detectadas(
             "1.0 mm",
             (x1 + 6, y1 - 8),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            0.6,
             (0, 255, 0),
             2,
             lineType=cv2.LINE_AA,
@@ -322,7 +309,7 @@ def preprocessar_primeiro_plano(img_bgr: np.ndarray, mask_roi: np.ndarray):
     }
 
 
-def recortar_roi_para_deteccao(img_gray: np.ndarray, roi_info: Dict[str, int], scale: float = 0.42):
+def recortar_roi_para_deteccao(img_gray: np.ndarray, roi_info: Dict[str, int], scale: float = 0.48):
     h, w = img_gray.shape[:2]
 
     cx = int(roi_info["cx"])
@@ -486,8 +473,8 @@ def detectar_bolhas_primeiro_plano(
     focus = prep["focus"]
 
     fontes = [
-        ("focus", focus, 0.45),
-        ("gray", gray_blur, 0.45),
+        ("focus", focus, 0.48),
+        ("gray", gray_blur, 0.48),
     ]
 
     candidatos = []
@@ -500,40 +487,40 @@ def detectar_bolhas_primeiro_plano(
             faixas = [
                 {
                     "nome": "pequenas",
-                    "minR": max(4, int(px_small * 0.018)),
-                    "maxR": max(10, int(px_small * 0.040)),
-                    "minDist": max(7, int(px_small * 0.018)),
-                    "param2": 13,
+                    "minR": max(4, int(px_small * 0.016)),
+                    "maxR": max(11, int(px_small * 0.040)),
+                    "minDist": max(7, int(px_small * 0.016)),
+                    "param2": 11,
                 },
                 {
                     "nome": "medias",
-                    "minR": max(10, int(px_small * 0.040)),
-                    "maxR": max(24, int(px_small * 0.095)),
-                    "minDist": max(10, int(px_small * 0.030)),
-                    "param2": 14,
+                    "minR": max(11, int(px_small * 0.040)),
+                    "maxR": max(24, int(px_small * 0.090)),
+                    "minDist": max(10, int(px_small * 0.028)),
+                    "param2": 12,
                 },
                 {
                     "nome": "grandes",
-                    "minR": max(24, int(px_small * 0.095)),
-                    "maxR": max(58, int(px_small * 0.220)),
-                    "minDist": max(16, int(px_small * 0.050)),
-                    "param2": 15,
+                    "minR": max(24, int(px_small * 0.090)),
+                    "maxR": max(60, int(px_small * 0.220)),
+                    "minDist": max(15, int(px_small * 0.050)),
+                    "param2": 13,
                 },
             ]
         else:
             faixas = [
-                {"nome": "pequenas", "minR": 4, "maxR": 10, "minDist": 7, "param2": 13},
-                {"nome": "medias", "minR": 10, "maxR": 24, "minDist": 10, "param2": 14},
-                {"nome": "grandes", "minR": 24, "maxR": 58, "minDist": 16, "param2": 15},
+                {"nome": "pequenas", "minR": 4, "maxR": 11, "minDist": 7, "param2": 11},
+                {"nome": "medias", "minR": 11, "maxR": 24, "minDist": 10, "param2": 12},
+                {"nome": "grandes", "minR": 24, "maxR": 60, "minDist": 15, "param2": 13},
             ]
 
         for faixa in faixas:
             circles = cv2.HoughCircles(
                 crop,
                 cv2.HOUGH_GRADIENT,
-                dp=1.15,
+                dp=1.12,
                 minDist=faixa["minDist"],
-                param1=95,
+                param1=85,
                 param2=faixa["param2"],
                 minRadius=faixa["minR"],
                 maxRadius=faixa["maxR"],
@@ -558,12 +545,11 @@ def detectar_bolhas_primeiro_plano(
                 if met is None:
                     continue
 
-                # limiares mais suaves
-                if met["focus_ring"] < 12:
+                if met["focus_ring"] < 8:
                     continue
-                if met["ring_darkness"] < 0.8:
+                if met["ring_darkness"] < 0.3:
                     continue
-                if met["score"] < 14:
+                if met["score"] < 8:
                     continue
 
                 candidatos.append(
@@ -586,29 +572,21 @@ def detectar_bolhas_primeiro_plano(
     if not candidatos:
         return []
 
-    arr_score = np.array([c["score"] for c in candidatos], dtype=np.float32)
-    arr_focus = np.array([c["focus_ring"] for c in candidatos], dtype=np.float32)
-    arr_dark = np.array([c["ring_darkness"] for c in candidatos], dtype=np.float32)
-
-    # thresholds mais permissivos
-    thr_score = max(14.0, float(np.percentile(arr_score, 35)))
-    thr_focus = max(12.0, float(np.percentile(arr_focus, 35)))
-    thr_dark = max(0.8, float(np.percentile(arr_dark, 35)))
-
-    bolhas = [
-        c for c in candidatos
-        if c["score"] >= thr_score
-        and c["focus_ring"] >= thr_focus
-        and c["ring_darkness"] >= thr_dark
-    ]
-
-    bolhas = sorted(
-        bolhas,
-        key=lambda c: (c["score"], c["focus_ring"], c["r"]),
+    candidatos = sorted(
+        candidatos,
+        key=lambda c: (
+            c["focus_ring"] * 1.4 +
+            c["ring_darkness"] * 2.0 +
+            c["score"] * 0.8 +
+            c["r"] * 0.15
+        ),
         reverse=True,
     )
 
-    return bolhas
+    if len(candidatos) > 220:
+        candidatos = candidatos[:220]
+
+    return candidatos
 
 
 # ============================================================
@@ -746,5 +724,4 @@ def render_consulta_imagens(
         st.image(bgr_to_rgb(img2), use_container_width=True)
         st.info(f"Bolhas detectadas: {len(bolhas)}")
     else:
-        st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
         st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
