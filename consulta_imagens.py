@@ -56,9 +56,11 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
         x, y, ww, hh = cv2.boundingRect(cnt)
         aspect = ww / max(hh, 1)
         area = ww * hh
-        if ww > 60 and hh < 20 and aspect > 5 and area > melhor_area:
-            melhor_area = area
-            melhor = (x, y, ww, hh)
+
+        if ww > 60 and hh < 20 and aspect > 5:
+            if area > melhor_area:
+                melhor_area = area
+                melhor = (x, y, ww, hh)
 
     if melhor is None:
         return None, img_annot, None
@@ -68,7 +70,14 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
     gy = y0 + y
 
     cv2.rectangle(img_annot, (gx, gy), (gx + ww, gy + hh), (0, 255, 0), 2)
-    cv2.line(img_annot, (gx, gy + hh // 2), (gx + ww, gy + hh // 2), (0, 255, 0), 2)
+    cv2.line(
+        img_annot,
+        (gx, gy + hh // 2),
+        (gx + ww, gy + hh // 2),
+        (0, 255, 0),
+        2
+    )
+
     cv2.putText(
         img_annot,
         f"1.0 mm = {ww} px",
@@ -85,14 +94,38 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
 
 
 # ============================================================
-# REGIÕES EXCLUÍDAS
+# ROI CIRCULAR
+# ============================================================
+def criar_mascara_circular(shape, raio_frac=0.43):
+    h, w = shape[:2]
+    cx = w // 2
+    cy = h // 2
+
+    r = int(min(h, w) * raio_frac)
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (cx, cy), r, 255, -1)
+
+    return mask, {"cx": cx, "cy": cy, "r": r}
+
+
+def desenhar_roi_circular(img_bgr, roi_info):
+    out = img_bgr.copy()
+    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 0), 2)
+    return out
+
+
+# ============================================================
+# MÁSCARAS EXTRAS
 # ============================================================
 def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
+    # faixa superior com texto
     mask[0:int(h * 0.035), :] = 255
 
+    # barra de escala
     if barra_info is not None:
         x = barra_info["x"]
         y = barra_info["y"]
@@ -103,172 +136,145 @@ def criar_mascara_regioes_excluidas(shape, barra_info=None):
         y_ini = max(0, y - 60)
         x_fim = min(w, x + ww + 90)
         y_fim = min(h, y + hh + 20)
+
         mask[y_ini:y_fim, x_ini:x_fim] = 255
 
     return mask
 
 
-def aplicar_mascara_exclusao(img_gray: np.ndarray, mask_exclusao: np.ndarray, valor: int = 255):
+def combinar_mascaras_roi(mask_circular, mask_excluir):
+    # região útil = círculo E não excluído
+    roi = np.zeros_like(mask_circular)
+    roi[(mask_circular == 255) & (mask_excluir == 0)] = 255
+    return roi
+
+
+def aplicar_roi(img_gray, mask_roi, valor_fora=0):
     out = img_gray.copy()
-    out[mask_exclusao == 255] = valor
+    out[mask_roi == 0] = valor_fora
     return out
 
 
 # ============================================================
-# PRÉ-PROCESSAMENTO NOVO
+# PRÉ-PROCESSAMENTO
 # ============================================================
-def preprocessar_base(img_bgr: np.ndarray, mask_exclusao: np.ndarray):
-    gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+def preprocessar_base(img_bgr: np.ndarray, mask_roi: np.ndarray):
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8, 8))
-    clahe_full = clahe.apply(gray_full)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    clahe_img = clahe.apply(gray)
 
-    bilateral_full = cv2.bilateralFilter(clahe_full, 9, 75, 75)
+    bilateral = cv2.bilateralFilter(clahe_img, 9, 75, 75)
 
-    blur_ref = cv2.GaussianBlur(bilateral_full, (0, 0), 1.2)
-    sharpen = cv2.addWeighted(bilateral_full, 1.45, blur_ref, -0.45, 0)
+    # realce suave
+    blur_ref = cv2.GaussianBlur(bilateral, (0, 0), 1.2)
+    sharpen = cv2.addWeighted(bilateral, 1.40, blur_ref, -0.40, 0)
 
+    # LoG absoluto
     log_img = cv2.Laplacian(sharpen, cv2.CV_32F, ksize=3)
     log_abs = np.abs(log_img)
     log_abs = cv2.normalize(log_abs, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    canny = cv2.Canny(sharpen, 40, 110)
-
-    gray_vis = gray_full.copy()
-    clahe_vis = clahe_full.copy()
-    bilateral_vis = bilateral_full.copy()
-    sharpen_vis = sharpen.copy()
-    log_vis = log_abs.copy()
-    canny_vis = canny.copy()
-
-    bilateral_proc = aplicar_mascara_exclusao(bilateral_full, mask_exclusao, valor=255)
-    sharpen_proc = aplicar_mascara_exclusao(sharpen, mask_exclusao, valor=255)
-    log_proc = aplicar_mascara_exclusao(log_abs, mask_exclusao, valor=0)
-    canny_proc = aplicar_mascara_exclusao(canny, mask_exclusao, valor=0)
+    # aplicar ROI só no processamento
+    gray_proc = aplicar_roi(gray, mask_roi, valor_fora=0)
+    clahe_proc = aplicar_roi(clahe_img, mask_roi, valor_fora=0)
+    bilateral_proc = aplicar_roi(bilateral, mask_roi, valor_fora=0)
+    sharpen_proc = aplicar_roi(sharpen, mask_roi, valor_fora=0)
+    log_proc = aplicar_roi(log_abs, mask_roi, valor_fora=0)
 
     return {
-        "gray_vis": gray_vis,
-        "clahe_vis": clahe_vis,
-        "bilateral_vis": bilateral_vis,
-        "sharpen_vis": sharpen_vis,
-        "log_vis": log_vis,
-        "canny_vis": canny_vis,
+        "gray_vis": gray,
+        "clahe_vis": clahe_img,
+        "bilateral_vis": bilateral,
+        "sharpen_vis": sharpen,
+        "log_vis": log_abs,
+        "gray_proc": gray_proc,
+        "clahe_proc": clahe_proc,
         "bilateral_proc": bilateral_proc,
         "sharpen_proc": sharpen_proc,
-        "log_proc": log_proc,
-        "canny_proc": canny_proc
+        "log_proc": log_proc
     }
 
 
 # ============================================================
-# FAIXAS AUTOMÁTICAS DE RAIO
+# DETECÇÃO BLOB MULTIESCALA VIA LoG
 # ============================================================
-def obter_faixas_raio(shape, px_per_mm=None):
-    h, w = shape[:2]
-    base = min(h, w)
-
+def obter_sigmas(px_per_mm=None):
     if px_per_mm is not None and px_per_mm > 0:
-        pequeno = (max(4, int(px_per_mm * 0.012)), max(8, int(px_per_mm * 0.045)))
-        medio = (max(8, int(px_per_mm * 0.045)), max(18, int(px_per_mm * 0.12)))
-        grande = (max(18, int(px_per_mm * 0.12)), max(50, int(px_per_mm * 0.28)))
+        # aproximadamente da ordem dos raios observados
+        sigmas = [
+            px_per_mm * 0.010,
+            px_per_mm * 0.015,
+            px_per_mm * 0.022,
+            px_per_mm * 0.032,
+            px_per_mm * 0.045,
+            px_per_mm * 0.065,
+            px_per_mm * 0.090
+        ]
     else:
-        pequeno = (4, max(10, int(base * 0.012)))
-        medio = (max(10, int(base * 0.012)), max(24, int(base * 0.035)))
-        grande = (max(24, int(base * 0.035)), max(55, int(base * 0.09)))
+        sigmas = [2.0, 3.0, 4.5, 6.0, 8.0, 11.0, 15.0]
 
-    return [
-        ("Pequenas", pequeno[0], pequeno[1], 12),
-        ("Médias", medio[0], medio[1], 18),
-        ("Grandes", grande[0], grande[1], 28),
-    ]
+    sigmas = [float(max(1.5, s)) for s in sigmas]
+    return sigmas
 
 
-# ============================================================
-# Hough em múltiplos canais
-# ============================================================
-def detectar_hough_em_canal(img_gray, nome_canal, faixas):
+def detectar_blobs_log_multiescala(img_gray, mask_roi, px_per_mm=None):
+    sigmas = obter_sigmas(px_per_mm)
     candidatos = []
+    h, w = img_gray.shape[:2]
 
-    for nome_faixa, rmin, rmax, min_dist in faixas:
-        if nome_faixa == "Pequenas":
-            dp, p1, p2 = 1.1, 95, 11
-        elif nome_faixa == "Médias":
-            dp, p1, p2 = 1.15, 100, 14
-        else:
-            dp, p1, p2 = 1.2, 110, 16
+    for sigma in sigmas:
+        blur = cv2.GaussianBlur(img_gray, (0, 0), sigma)
+        log = cv2.Laplacian(blur, cv2.CV_32F, ksize=3)
+        resp = np.abs(log)
+        resp = cv2.normalize(resp, None, 0, 255, cv2.NORM_MINMAX)
 
-        circles = cv2.HoughCircles(
-            img_gray,
-            cv2.HOUGH_GRADIENT,
-            dp=dp,
-            minDist=min_dist,
-            param1=p1,
-            param2=p2,
-            minRadius=rmin,
-            maxRadius=rmax
-        )
+        # threshold local suave por escala
+        thr_val = max(18, np.percentile(resp[mask_roi == 255], 92))
+        pts = np.argwhere(resp >= thr_val)
 
-        if circles is not None:
-            circles = np.round(circles[0, :]).astype(int)
-            for c in circles:
-                candidatos.append({
-                    "x": int(c[0]),
-                    "y": int(c[1]),
-                    "r": int(c[2]),
-                    "faixa": nome_faixa,
-                    "canal": nome_canal
-                })
+        step = max(1, len(pts) // 2500)
+        pts = pts[::step]
+
+        for y, x in pts:
+            if mask_roi[y, x] == 0:
+                continue
+
+            r = math.sqrt(2.0) * sigma
+            if r < 4 or r > 120:
+                continue
+
+            candidatos.append({
+                "x": int(x),
+                "y": int(y),
+                "r": float(r),
+                "sigma": float(sigma),
+                "resp": float(resp[y, x])
+            })
 
     return candidatos
 
 
-def detectar_candidatos_multicanal(prep, faixas):
-    c1 = detectar_hough_em_canal(prep["bilateral_proc"], "Bilateral", faixas)
-    c2 = detectar_hough_em_canal(prep["sharpen_proc"], "Realçada", faixas)
-    c3 = detectar_hough_em_canal(prep["log_proc"], "LoG", faixas)
-
-    return c1 + c2 + c3
-
-
 # ============================================================
-# AJUDAS GEOMÉTRICAS
+# VALIDAÇÃO DOS BLOBs
 # ============================================================
-def ponto_em_regiao_util(x, y, shape, margem_x_frac=0.05, margem_y_frac=0.04):
-    h, w = shape[:2]
-    mx = int(w * margem_x_frac)
-    my = int(h * margem_y_frac)
-    return (mx <= x <= w - mx) and (my <= y <= h - my)
-
-
-def circulo_longe_da_borda(x, y, r, shape, margem=3):
-    h, w = shape[:2]
-    return (
-        x - r > margem and
-        y - r > margem and
-        x + r < w - margem and
-        y + r < h - margem
-    )
-
-
-def sample_circle_points(cx, cy, r, n=72):
-    angs = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    pts = []
-    for a in angs:
-        x = int(round(cx + r * np.cos(a)))
-        y = int(round(cy + r * np.sin(a)))
-        pts.append((x, y))
-    return pts
-
-
-def valores_em_circulo(img, cx, cy, r, n=72):
+def media_anel(img, cx, cy, r, esp=1.5, n=72):
     h, w = img.shape[:2]
     vals = []
-    for x, y in sample_circle_points(cx, cy, r, n=n):
-        if 0 <= x < w and 0 <= y < h:
-            vals.append(float(img[y, x]))
+
+    for rr in [max(1.0, r - esp), r, r + esp]:
+        for k in range(n):
+            a = 2 * np.pi * k / n
+            x = int(round(cx + rr * np.cos(a)))
+            y = int(round(cy + rr * np.sin(a)))
+            if 0 <= x < w and 0 <= y < h:
+                vals.append(float(img[y, x]))
+
     if len(vals) == 0:
-        return np.array([0.0], dtype=np.float32)
-    return np.array(vals, dtype=np.float32)
+        return 0.0, 0.0
+
+    vals = np.array(vals, dtype=np.float32)
+    return float(np.mean(vals)), float(np.std(vals))
 
 
 def media_disco(img, cx, cy, r):
@@ -284,87 +290,77 @@ def media_disco(img, cx, cy, r):
     yy, xx = np.ogrid[y0:y1, x0:x1]
     mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= r ** 2
     vals = img[y0:y1, x0:x1][mask]
+
     if vals.size == 0:
         return 0.0
+
     return float(np.mean(vals))
 
 
-# ============================================================
-# VALIDAÇÃO MAIS LEVE E MELHOR
-# ============================================================
-def validar_candidato_bolha(cand, gray_img, edge_img, shape):
-    cx, cy, r = cand["x"], cand["y"], cand["r"]
+def dentro_roi_circular(x, y, roi_info, folga=0):
+    dx = x - roi_info["cx"]
+    dy = y - roi_info["cy"]
+    return (dx * dx + dy * dy) <= (roi_info["r"] - folga) ** 2
 
-    if not ponto_em_regiao_util(cx, cy, shape, 0.05, 0.04):
+
+def validar_blob(cand, prep, roi_info, mask_roi):
+    x = cand["x"]
+    y = cand["y"]
+    r = cand["r"]
+
+    if not dentro_roi_circular(x, y, roi_info, folga=int(r + 3)):
         return None
-    if not circulo_longe_da_borda(cx, cy, r, shape, margem=3):
+
+    if mask_roi[y, x] == 0:
         return None
-    if r < 4:
-        return None
 
-    ring_in = valores_em_circulo(edge_img, cx, cy, max(2, int(round(r * 0.90))), n=96)
-    ring_mid = valores_em_circulo(edge_img, cx, cy, r, n=96)
-    ring_out = valores_em_circulo(edge_img, cx, cy, max(2, int(round(r * 1.10))), n=96)
+    gray = prep["gray_proc"]
+    log_img = prep["log_proc"]
+    sharp = prep["sharpen_proc"]
 
-    edge_vals = np.concatenate([ring_in, ring_mid, ring_out])
-    edge_mean = float(np.mean(edge_vals))
-    edge_std = float(np.std(edge_vals))
+    # medidas internas / anel / externas
+    inside = media_disco(gray, x, y, max(1, int(r * 0.55)))
+    ring_mean_gray, ring_std_gray = media_anel(gray, x, y, r, esp=max(1.0, r * 0.08), n=96)
+    outer = media_disco(gray, x, y, max(1, int(r * 1.25))) - media_disco(gray, x, y, max(1, int(r * 0.95)))
 
-    thr = max(14.0, edge_mean * 0.85)
-    edge_fraction = float(np.mean(edge_vals > thr))
+    ring_mean_log, ring_std_log = media_anel(log_img, x, y, r, esp=max(1.0, r * 0.08), n=96)
+    ring_mean_sharp, ring_std_sharp = media_anel(sharp, x, y, r, esp=max(1.0, r * 0.08), n=96)
 
-    inside_mean = media_disco(gray_img, cx, cy, max(1, int(round(r * 0.55))))
-    ring_gray = float(np.mean(valores_em_circulo(gray_img, cx, cy, r, n=96)))
+    contrast_ring = abs(ring_mean_gray - inside)
+    log_strength = ring_mean_log
+    stability = 1.0 / (1.0 + ring_std_log / max(1.0, ring_mean_log))
 
-    out1 = media_disco(gray_img, cx, cy, max(1, int(round(r * 1.35))))
-    out2 = media_disco(gray_img, cx, cy, max(1, int(round(r * 1.10))))
-    outside_band = out1 - out2
-
-    contrast_ring = abs(ring_gray - inside_mean)
-    stability = 1.0 / (1.0 + edge_std / max(1.0, edge_mean))
-
-    # bônus por canal
-    canal_bonus = 0.0
-    if cand["canal"] == "Realçada":
-        canal_bonus = 12.0
-    elif cand["canal"] == "LoG":
-        canal_bonus = 8.0
-    else:
-        canal_bonus = 10.0
-
+    # score de validação
     score = (
-        0.55 * edge_mean +
-        140.0 * edge_fraction +
-        0.45 * contrast_ring +
-        90.0 * stability +
-        0.22 * r +
-        canal_bonus
+        1.8 * cand["resp"] +
+        2.0 * log_strength +
+        5.0 * contrast_ring +
+        120.0 * stability +
+        1.2 * r
     )
 
-    # filtros mínimos mais brandos que a versão anterior
-    if edge_fraction < 0.12:
+    # filtros mínimos
+    if log_strength < 12:
         return None
-    if edge_mean < 10:
+    if contrast_ring < 1.2:
         return None
-    if contrast_ring < 1.5:
+    if stability < 0.12:
         return None
 
     out = cand.copy()
     out.update({
         "score": float(score),
-        "edge_mean": float(edge_mean),
-        "edge_fraction": float(edge_fraction),
         "contrast_ring": float(contrast_ring),
-        "stability": float(stability),
-        "outside_band": float(outside_band)
+        "log_strength": float(log_strength),
+        "stability": float(stability)
     })
     return out
 
 
-def validar_candidatos(candidatos, gray_img, edge_img, shape):
+def validar_blobs(candidatos, prep, roi_info, mask_roi):
     validos = []
     for c in candidatos:
-        v = validar_candidato_bolha(c, gray_img, edge_img, shape)
+        v = validar_blob(c, prep, roi_info, mask_roi)
         if v is not None:
             validos.append(v)
     return validos
@@ -373,7 +369,7 @@ def validar_candidatos(candidatos, gray_img, edge_img, shape):
 # ============================================================
 # REMOÇÃO DE DUPLICATAS
 # ============================================================
-def agrupar_candidatos_proximos(candidatos):
+def agrupar_candidatos(candidatos):
     grupos = []
     usados = [False] * len(candidatos)
 
@@ -397,7 +393,7 @@ def agrupar_candidatos_proximos(candidatos):
                     r_ref = max(ck["r"], cj["r"])
                     dr = abs(ck["r"] - cj["r"])
 
-                    if dist <= 0.85 * r_ref and dr <= 0.55 * r_ref:
+                    if dist <= 0.9 * r_ref and dr <= 0.6 * r_ref:
                         grupo.append(j)
                         usados[j] = True
                         mudou = True
@@ -412,7 +408,7 @@ def manter_melhor_por_grupo(candidatos):
     if not candidatos:
         return []
 
-    grupos = agrupar_candidatos_proximos(candidatos)
+    grupos = agrupar_candidatos(candidatos)
     finais = []
 
     for g in grupos:
@@ -430,6 +426,7 @@ def montar_dataframe_bolhas(candidatos, px_per_mm):
     for i, c in enumerate(candidatos, start=1):
         diam_px = 2.0 * c["r"]
         diam_um = None
+
         if px_per_mm is not None and px_per_mm > 0:
             diam_um = (diam_px / px_per_mm) * 1000.0
 
@@ -441,10 +438,9 @@ def montar_dataframe_bolhas(candidatos, px_per_mm):
             "Diâmetro (px)": round(float(diam_px), 2),
             "Diâmetro (µm)": None if diam_um is None else round(float(diam_um), 2),
             "Score": round(float(c["score"]), 2),
-            "Continuidade": round(float(c["edge_fraction"]), 3),
             "Contraste do anel": round(float(c["contrast_ring"]), 2),
-            "Canal": c["canal"],
-            "Faixa": c["faixa"]
+            "Força LoG": round(float(c["log_strength"]), 2),
+            "Estabilidade": round(float(c["stability"]), 3)
         })
 
     return pd.DataFrame(dados)
@@ -488,33 +484,47 @@ def plotar_distribuicao(df):
 # ============================================================
 # DESENHO
 # ============================================================
-def desenhar_candidatos(img_bgr, candidatos, titulo="Bolhas detectadas"):
+def desenhar_roi_e_bolhas(img_bgr, roi_info, bolhas, titulo="Bolhas detectadas"):
     out = img_bgr.copy()
-    rng = np.random.default_rng(42)
 
-    for c in candidatos:
+    # sombrear fora da ROI
+    overlay = out.copy()
+    h, w = out.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (roi_info["cx"], roi_info["cy"]), roi_info["r"], 255, -1)
+    overlay[mask == 0] = (15, 15, 15)
+    out = cv2.addWeighted(out, 0.60, overlay, 0.40, 0)
+
+    # círculo da ROI
+    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
+
+    # bolhas
+    rng = np.random.default_rng(42)
+    for i, b in enumerate(bolhas, start=1):
         color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        cv2.circle(out, (int(c["x"]), int(c["y"])), int(c["r"]), color, 2)
+        cv2.circle(out, (int(b["x"]), int(b["y"])), int(round(b["r"])), color, 2)
+        cv2.putText(
+            out,
+            str(i),
+            (int(b["x"] - 6), int(b["y"] + 4)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            color,
+            1,
+            cv2.LINE_AA
+        )
 
     cv2.putText(
         out,
-        f"{titulo}: {len(candidatos)}",
-        (20, 35),
+        f"{titulo}: {len(bolhas)}",
+        (20, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
         (255, 255, 255),
         2,
         cv2.LINE_AA
     )
-    return out
 
-
-def desenhar_regiao_util(img_bgr):
-    out = img_bgr.copy()
-    h, w = out.shape[:2]
-    mx = int(w * 0.05)
-    my = int(h * 0.04)
-    cv2.rectangle(out, (mx, my), (w - mx, h - my), (255, 255, 0), 2)
     return out
 
 
@@ -545,26 +555,36 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             img_original_bgr = pil_to_cv(img_original_pil)
 
             barra_px_auto, img_calibracao, barra_info = detectar_barra_escala_px(img_original_bgr)
-            mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape, barra_info)
 
-            prep = preprocessar_base(img_original_bgr, mask_exclusao)
-            faixas = obter_faixas_raio(img_original_bgr.shape, barra_px_auto)
+            mask_circular, roi_info = criar_mascara_circular(img_original_bgr.shape, raio_frac=0.43)
+            mask_excluir = criar_mascara_regioes_excluidas(img_original_bgr.shape, barra_info)
+            mask_roi = combinar_mascaras_roi(mask_circular, mask_excluir)
 
-            candidatos_brutos = detectar_candidatos_multicanal(prep, faixas)
-            candidatos_validos = validar_candidatos(
-                candidatos_brutos,
-                prep["gray_vis"],
-                prep["canny_vis"],
-                img_original_bgr.shape
+            prep = preprocessar_base(img_original_bgr, mask_roi)
+
+            candidatos_brutos = detectar_blobs_log_multiescala(
+                prep["log_proc"],
+                mask_roi,
+                px_per_mm=barra_px_auto
             )
-            candidatos_finais = manter_melhor_por_grupo(candidatos_validos)
 
-            img_regiao = desenhar_regiao_util(img_original_bgr)
-            img_brutos = desenhar_candidatos(img_original_bgr, candidatos_brutos, "Candidatos brutos")
-            img_validos = desenhar_candidatos(img_original_bgr, candidatos_validos, "Após validação radial")
-            img_finais = desenhar_candidatos(img_original_bgr, candidatos_finais, "Bolhas detectadas")
+            candidatos_validos = validar_blobs(
+                candidatos_brutos,
+                prep,
+                roi_info,
+                mask_roi
+            )
 
-            df = montar_dataframe_bolhas(candidatos_finais, barra_px_auto)
+            bolhas_finais = manter_melhor_por_grupo(candidatos_validos)
+
+            img_resultado = desenhar_roi_e_bolhas(
+                img_original_bgr,
+                roi_info,
+                bolhas_finais,
+                titulo="Bolhas detectadas"
+            )
+
+            df = montar_dataframe_bolhas(bolhas_finais, barra_px_auto)
 
             st.markdown("## Calibração")
             if barra_px_auto is not None:
@@ -572,53 +592,35 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             else:
                 st.warning("Barra não detectada automaticamente.")
 
-            st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm detectada", width=460)
+            st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm detectada", width=420)
 
             st.markdown("## Pré-processamento")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.caption("Imagem original")
-                st.image(img_original_pil, width=210)
+                st.image(img_original_pil, width=190)
             with c2:
                 st.caption("CLAHE")
-                st.image(prep["clahe_vis"], width=210)
+                st.image(prep["clahe_vis"], width=190)
             with c3:
                 st.caption("Filtro bilateral")
-                st.image(prep["bilateral_vis"], width=210)
+                st.image(prep["bilateral_vis"], width=190)
             with c4:
-                st.caption("Realce suave")
-                st.image(prep["sharpen_vis"], width=210)
+                st.caption("LoG absoluto")
+                st.image(prep["log_vis"], width=190)
 
             st.markdown("## Diagnóstico")
-            d1, d2 = st.columns(2)
-            with d1:
-                st.caption("LoG absoluto")
-                st.image(prep["log_vis"], width=360)
-            with d2:
-                st.caption("Região útil considerada")
-                st.image(cv_to_pil(img_regiao), width=360)
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Candidatos brutos", len(candidatos_brutos))
+            d2.metric("Candidatos válidos", len(candidatos_validos))
+            d3.metric("Bolhas detectadas", len(bolhas_finais))
 
-            st.markdown("## Nova estratégia")
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                st.caption("Candidatos brutos multicanal")
-                st.image(cv_to_pil(img_brutos), width=260)
-            with r2:
-                st.caption("Após validação radial")
-                st.image(cv_to_pil(img_validos), width=260)
-            with r3:
-                st.caption("Após remover duplicatas")
-                st.image(cv_to_pil(img_finais), width=260)
-
-            st.markdown("## Diagnóstico numérico")
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Candidatos brutos", len(candidatos_brutos))
-            k2.metric("Candidatos válidos", len(candidatos_validos))
-            k3.metric("Bolhas detectadas", len(candidatos_finais))
+            st.markdown("## Resultado final na área útil circular")
+            st.image(cv_to_pil(img_resultado), width=760)
 
             st.markdown("## Resumo")
             if df.empty:
-                st.warning("Nenhuma bolha foi detectada com a nova estratégia.")
+                st.warning("Nenhuma bolha foi detectada com a estratégia da ROI circular.")
                 return
 
             st.dataframe(df, use_container_width=True)
@@ -627,10 +629,16 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                 maiores_500 = df[df["Diâmetro (µm)"] > 500]
                 pct_500 = 100.0 * len(maiores_500) / len(df)
 
-                s1, s2, s3 = st.columns(3)
-                s1.metric("Bolhas > 500 µm", len(maiores_500))
-                s2.metric("% > 500 µm", f"{pct_500:.2f}%")
-                s3.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Bolhas totais", len(df))
+                s2.metric("Bolhas > 500 µm", len(maiores_500))
+                s3.metric("% > 500 µm", f"{pct_500:.2f}%")
+                s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+
+                st.markdown("## Estatísticas")
+                e1, e2 = st.columns(2)
+                e1.metric("Mediana (µm)", f"{df['Diâmetro (µm)'].median():.2f}")
+                e2.metric("Máximo (µm)", f"{df['Diâmetro (µm)'].max():.2f}")
 
                 fig_bar, fig_curve, tabela = plotar_distribuicao(df)
                 if fig_bar is not None:
