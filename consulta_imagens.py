@@ -99,10 +99,10 @@ def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    # topo com texto
+    # faixa superior do texto
     mask[0:int(h * 0.035), :] = 255
 
-    # região pequena da barra
+    # régua
     if barra_info is not None:
         x = barra_info["x"]
         y = barra_info["y"]
@@ -189,6 +189,17 @@ def binarizar_gradiente(grad, mask_exclusao, block_size, c_value, open_iter, clo
 
 
 # ============================================================
+# FILTRO ESPACIAL
+# ============================================================
+def dentro_da_regiao_util(cx, cy, shape, margem_x_frac, margem_y_frac):
+    h, w = shape[:2]
+    mx = int(w * margem_x_frac)
+    my = int(h * margem_y_frac)
+
+    return (mx <= cx <= (w - mx)) and (my <= cy <= (h - my))
+
+
+# ============================================================
 # CANDIDATOS CIRCULARES
 # ============================================================
 def extrair_candidatos_circulares(
@@ -199,7 +210,10 @@ def extrair_candidatos_circulares(
     solidez_min,
     raio_min,
     raio_max,
-    aspect_tol
+    aspect_tol,
+    shape_img,
+    margem_x_frac,
+    margem_y_frac
 ):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidatos = []
@@ -238,6 +252,9 @@ def extrair_candidatos_circulares(
         if r < raio_min or r > raio_max:
             continue
 
+        if not dentro_da_regiao_util(cx, cy, shape_img, margem_x_frac, margem_y_frac):
+            continue
+
         candidatos.append({
             "contorno": cnt,
             "area": float(area),
@@ -246,7 +263,7 @@ def extrair_candidatos_circulares(
             "bbox": (x, y, w, h),
             "cx": float(cx),
             "cy": float(cy),
-            "r": float(r),
+            "r": float(r)
         })
 
     return candidatos
@@ -298,17 +315,27 @@ def agrupar_por_proximidade(candidatos, fator_dist=1.0):
     return grupos
 
 
-def escolher_candidato_dominante(grupo):
+def escolher_candidato_dominante(grupo, shape_img, margem_x_frac, margem_y_frac):
+    h, w = shape_img[:2]
+    centro_x = w / 2.0
+    centro_y = h / 2.0
+    diag = (w ** 2 + h ** 2) ** 0.5
+
     melhor = None
     melhor_score = -1e9
 
     for c in grupo:
+        dist_centro = ((c["cx"] - centro_x) ** 2 + (c["cy"] - centro_y) ** 2) ** 0.5
+        fator_central = 1.0 - (dist_centro / diag)
+
         score = (
-            2.5 * c["circularidade"] +
-            2.0 * c["solidez"] +
-            0.0010 * c["area"] +
-            0.02 * c["r"]
+            2.0 * c["circularidade"] +
+            1.8 * c["solidez"] +
+            0.0015 * c["area"] +
+            0.06 * c["r"] +
+            1.2 * fator_central
         )
+
         if score > melhor_score:
             melhor_score = score
             melhor = c
@@ -316,12 +343,15 @@ def escolher_candidato_dominante(grupo):
     return melhor
 
 
-def manter_candidatos_dominantes(candidatos, fator_dist):
+def manter_candidatos_dominantes(candidatos, fator_dist, shape_img, margem_x_frac, margem_y_frac):
     if not candidatos:
         return []
 
     grupos = agrupar_por_proximidade(candidatos, fator_dist=fator_dist)
-    finais = [escolher_candidato_dominante(g) for g in grupos if len(g) > 0]
+    finais = [
+        escolher_candidato_dominante(g, shape_img, margem_x_frac, margem_y_frac)
+        for g in grupos if len(g) > 0
+    ]
     return finais
 
 
@@ -363,6 +393,17 @@ def desenhar_circulos_coloridos(img_bgr, candidatos, mostrar_id=False):
         cv2.LINE_AA
     )
 
+    return out
+
+
+def desenhar_regiao_util(img_bgr, margem_x_frac, margem_y_frac):
+    out = img_bgr.copy()
+    h, w = out.shape[:2]
+
+    mx = int(w * margem_x_frac)
+    my = int(h * margem_y_frac)
+
+    cv2.rectangle(out, (mx, my), (w - mx, h - my), (255, 255, 0), 2)
     return out
 
 
@@ -443,28 +484,33 @@ def render_consulta_imagens(
             open_iter = st.slider("Abertura morfológica", 0, 3, 0, 1)
         with c5:
             close_iter = st.slider("Fechamento morfológico", 0, 3, 1, 1)
-            area_min = st.slider("Área mínima (px²)", 5, 5000, 20, 5)
+            area_min = st.slider("Área mínima (px²)", 5, 5000, 60, 5)
         with c6:
-            area_max = st.slider("Área máxima (px²)", 100, 50000, 12000, 50)
-            circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.15, 0.01)
+            area_max = st.slider("Área máxima (px²)", 100, 50000, 10000, 50)
+            circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.22, 0.01)
 
         c7, c8, c9, c10 = st.columns(4)
         with c7:
-            solidez_min = st.slider("Solidez mínima", 0.10, 1.00, 0.40, 0.01)
+            solidez_min = st.slider("Solidez mínima", 0.10, 1.00, 0.55, 0.01)
         with c8:
-            raio_min = st.slider("Raio mínimo (px)", 2, 80, 4, 1)
+            raio_min = st.slider("Raio mínimo (px)", 2, 80, 6, 1)
         with c9:
             raio_max = st.slider("Raio máximo (px)", 10, 300, 120, 1)
         with c10:
-            aspect_tol = st.slider("Tolerância largura/altura", 1.0, 3.0, 2.4, 0.1)
+            aspect_tol = st.slider("Tolerância largura/altura", 1.0, 3.0, 2.2, 0.1)
 
-        fator_dist = st.slider(
-            "Agrupamento por proximidade",
-            0.5, 2.5, 0.85, 0.05,
-            help="Valores menores agrupam menos e preservam mais círculos."
-        )
+        st.markdown("## Filtro espacial e agrupamento")
+
+        c11, c12, c13 = st.columns(3)
+        with c11:
+            margem_x_frac = st.slider("Margem lateral excluída (%)", 0.0, 0.30, 0.12, 0.01)
+        with c12:
+            margem_y_frac = st.slider("Margem superior/inferior excluída (%)", 0.0, 0.30, 0.08, 0.01)
+        with c13:
+            fator_dist = st.slider("Agrupamento por proximidade", 0.5, 2.5, 0.90, 0.05)
 
         mostrar_id = st.checkbox("Mostrar índice dos candidatos", value=False)
+        mostrar_regiao = st.checkbox("Mostrar região útil", value=True)
 
         try:
             img_original_pil = baixar_imagem(url_imagem)
@@ -515,7 +561,10 @@ def render_consulta_imagens(
                 solidez_min=solidez_min,
                 raio_min=raio_min,
                 raio_max=raio_max,
-                aspect_tol=aspect_tol
+                aspect_tol=aspect_tol,
+                shape_img=img_original_bgr.shape,
+                margem_x_frac=margem_x_frac,
+                margem_y_frac=margem_y_frac
             )
 
             candidatos_sem_borda = filtrar_borda_candidatos(
@@ -525,13 +574,22 @@ def render_consulta_imagens(
 
             candidatos_finais = manter_candidatos_dominantes(
                 candidatos_sem_borda,
-                fator_dist=fator_dist
+                fator_dist=fator_dist,
+                shape_img=img_original_bgr.shape,
+                margem_x_frac=margem_x_frac,
+                margem_y_frac=margem_y_frac
             )
 
             img_candidatos = desenhar_circulos_coloridos(
                 img_original_bgr,
                 candidatos_finais,
                 mostrar_id=mostrar_id
+            )
+
+            img_regiao = desenhar_regiao_util(
+                img_original_bgr,
+                margem_x_frac,
+                margem_y_frac
             )
 
             st.markdown("## Tratamento inicial")
@@ -557,6 +615,10 @@ def render_consulta_imagens(
                 st.caption("Máscara do gradiente")
                 st.image(mask_grad, width=420)
 
+            if mostrar_regiao:
+                st.markdown("## Região útil considerada")
+                st.image(cv_to_pil(img_regiao), width=760)
+
             st.markdown("## Círculos dominantes sobre a imagem original")
             st.image(cv_to_pil(img_candidatos), width=760)
 
@@ -570,7 +632,7 @@ def render_consulta_imagens(
             st.dataframe(montar_resumo(candidatos_finais), use_container_width=True)
 
             st.info(
-                "Objetivo desta etapa: trocar pequenos fragmentos por círculos dominantes mais fáceis de interpretar visualmente."
+                "Objetivo desta etapa: descartar laterais/cantos e reduzir pequenos falsos positivos, favorecendo bolhas mais centrais e estáveis."
             )
 
         except Exception as e:
