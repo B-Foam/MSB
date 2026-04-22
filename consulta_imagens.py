@@ -257,7 +257,7 @@ def detectar_bolhas_multiescala(
     base = proc["blackhat"]
 
     # scale menor = mais rápido
-    crop, (x0, y0), scale = recortar_roi_para_deteccao(base, roi_info, scale=0.5)
+    crop, (x0, y0), scale = recortar_roi_para_deteccao(base, roi_info, scale=0.4)
 
     candidatos = []
 
