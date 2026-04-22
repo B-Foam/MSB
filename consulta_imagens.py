@@ -62,7 +62,7 @@ def detectar_barra_escala_px(img_bgr):
                 melhor = (x, y, ww, hh)
 
     if melhor is None:
-        return None, img_annot
+        return None, img_annot, None
 
     x, y, ww, hh = melhor
     gx = x0 + x
@@ -88,21 +88,39 @@ def detectar_barra_escala_px(img_bgr):
         cv2.LINE_AA
     )
 
-    return ww, img_annot
+    barra_info = {
+        "x": gx,
+        "y": gy,
+        "w": ww,
+        "h": hh
+    }
+
+    return ww, img_annot, barra_info
 
 
 # ============================================================
 # MÁSCARAS FIXAS
 # ============================================================
-def criar_mascara_regioes_excluidas(shape):
+def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    # topo com texto
-    mask[0:int(h * 0.05), :] = 255
+    # Faixa superior: apenas a linha de texto
+    mask[0:int(h * 0.035), :] = 255
 
-    # barra de escala / canto inferior esquerdo
-    mask[int(h * 0.78):h, 0:int(w * 0.22)] = 255
+    # Região da barra de escala: pequena e dinâmica
+    if barra_info is not None:
+        x = barra_info["x"]
+        y = barra_info["y"]
+        ww = barra_info["w"]
+        hh = barra_info["h"]
+
+        x_ini = max(0, x - 25)
+        y_ini = max(0, y - 60)
+        x_fim = min(w, x + ww + 90)
+        y_fim = min(h, y + hh + 20)
+
+        mask[y_ini:y_fim, x_ini:x_fim] = 255
 
     return mask
 
@@ -117,20 +135,29 @@ def aplicar_mascara_exclusao(img_gray, mask_exclusao, valor=255):
 # PIPELINE PRINCIPAL
 # ============================================================
 def gerar_imagens_base(img_bgr, mask_exclusao, clip_limit, bilateral_d, sigma_color, sigma_space):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = aplicar_mascara_exclusao(gray, mask_exclusao, valor=255)
+    gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
-    clahe_img = clahe.apply(gray)
+    clahe_full = clahe.apply(gray_full)
 
-    bilateral = cv2.bilateralFilter(
-        clahe_img,
+    bilateral_full = cv2.bilateralFilter(
+        clahe_full,
         d=bilateral_d,
         sigmaColor=sigma_color,
         sigmaSpace=sigma_space
     )
 
-    return gray, clahe_img, bilateral
+    # versões para visualização
+    gray_vis = gray_full.copy()
+    clahe_vis = clahe_full.copy()
+    bilateral_vis = bilateral_full.copy()
+
+    # versões para processamento
+    gray_proc = aplicar_mascara_exclusao(gray_full, mask_exclusao, valor=255)
+    clahe_proc = aplicar_mascara_exclusao(clahe_full, mask_exclusao, valor=255)
+    bilateral_proc = aplicar_mascara_exclusao(bilateral_full, mask_exclusao, valor=255)
+
+    return gray_vis, clahe_vis, bilateral_vis, gray_proc, clahe_proc, bilateral_proc
 
 
 def gerar_gradiente_morfologico(img_gray, kernel_size):
@@ -247,9 +274,6 @@ def filtrar_borda_contornos(candidatos, shape):
 
 
 def agrupar_por_proximidade(candidatos, fator_dist=1.2):
-    """
-    Agrupa candidatos que parecem pertencer à mesma bolha.
-    """
     grupos = []
     usados = [False] * len(candidatos)
 
@@ -283,13 +307,6 @@ def agrupar_por_proximidade(candidatos, fator_dist=1.2):
 
 
 def escolher_contorno_dominante(grupo):
-    """
-    Escolhe o melhor contorno do grupo.
-    Prioriza:
-    - maior circularidade
-    - maior solidez
-    - maior área
-    """
     melhor = None
     melhor_score = -1e9
 
@@ -316,20 +333,35 @@ def manter_contornos_dominantes(candidatos, fator_dist):
     return finais
 
 
-def desenhar_contornos(img_bgr, candidatos, cor=(0, 255, 0)):
+def desenhar_contornos_coloridos(img_bgr, candidatos, mostrar_id=False):
     out = img_bgr.copy()
+    rng = np.random.default_rng(42)
 
-    for c in candidatos:
+    for i, c in enumerate(candidatos, start=1):
         cnt = c["contorno"]
-        cv2.drawContours(out, [cnt], -1, cor, 1)
+        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
+        cv2.drawContours(out, [cnt], -1, color, 2)
+
+        if mostrar_id:
+            x, y, w, h = c["bbox"]
+            cv2.putText(
+                out,
+                str(i),
+                (x, max(15, y - 3)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                color,
+                1,
+                cv2.LINE_AA
+            )
 
     cv2.putText(
         out,
         f"Contornos finais: {len(candidatos)}",
-        (20, 40),
+        (20, 35),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        cor,
+        0.8,
+        (255, 255, 255),
         2,
         cv2.LINE_AA
     )
@@ -437,12 +469,14 @@ def render_consulta_imagens(
             help="Valores maiores agrupam mais contornos vizinhos e tendem a manter só um dominante por bolha."
         )
 
+        mostrar_id = st.checkbox("Mostrar índice das bolhas", value=False)
+
         try:
             img_original_pil = baixar_imagem(url_imagem)
             img_original_bgr = pil_to_cv(img_original_pil)
 
             # calibração
-            barra_px_auto, img_calibracao = detectar_barra_escala_px(img_original_bgr)
+            barra_px_auto, img_calibracao, barra_info = detectar_barra_escala_px(img_original_bgr)
 
             st.markdown("## Calibração")
             if barra_px_auto is not None:
@@ -457,10 +491,10 @@ def render_consulta_imagens(
             )
 
             # máscara fixa
-            mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
+            mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape, barra_info)
 
             # imagens base
-            gray, clahe_img, bilateral = gerar_imagens_base(
+            gray_vis, clahe_vis, bilateral_vis, gray_proc, clahe_proc, bilateral_proc = gerar_imagens_base(
                 img_original_bgr,
                 mask_exclusao,
                 clip_limit,
@@ -470,9 +504,11 @@ def render_consulta_imagens(
             )
 
             # gradiente e máscara
-            grad = gerar_gradiente_morfologico(bilateral, kernel_grad)
+            grad_vis = gerar_gradiente_morfologico(bilateral_vis, kernel_grad)
+            grad_proc = gerar_gradiente_morfologico(bilateral_proc, kernel_grad)
+
             mask_grad = binarizar_gradiente(
-                grad,
+                grad_proc,
                 mask_exclusao,
                 block_size,
                 c_value,
@@ -502,10 +538,10 @@ def render_consulta_imagens(
                 fator_dist=fator_dist
             )
 
-            img_contornos = desenhar_contornos(
+            img_contornos = desenhar_contornos_coloridos(
                 img_original_bgr,
                 contornos_finais,
-                cor=(0, 255, 0)
+                mostrar_id=mostrar_id
             )
 
             st.markdown("## Tratamento inicial")
@@ -516,17 +552,17 @@ def render_consulta_imagens(
                 st.image(img_original_pil, use_container_width=True)
             with p2:
                 st.caption("CLAHE")
-                st.image(clahe_img, use_container_width=True)
+                st.image(clahe_vis, use_container_width=True)
             with p3:
                 st.caption("Filtro bilateral")
-                st.image(bilateral, use_container_width=True)
+                st.image(bilateral_vis, use_container_width=True)
 
             st.markdown("## Diagnóstico do gradiente")
 
             p4, p5 = st.columns(2)
             with p4:
                 st.caption("Gradiente morfológico")
-                st.image(grad, use_container_width=True)
+                st.image(grad_vis, use_container_width=True)
             with p5:
                 st.caption("Máscara do gradiente")
                 st.image(mask_grad, use_container_width=True)
