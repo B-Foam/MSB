@@ -207,7 +207,7 @@ def desenhar_resultado_estilo_referencia(
     img_bgr: np.ndarray, 
     roi_info: Dict[str, Any], 
     circles: List[Dict[str, Any]], 
-    titulo: str = "Bolhas Detectadas"
+    titulo: str = "Granulometria de Espuma"
 ) -> np.ndarray:
     out = img_bgr.copy()
     h, w = out.shape[:2]
@@ -281,7 +281,7 @@ def montar_dataframe_medidas(circles: List[Dict[str, Any]], px_per_mm: Optional[
 def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
     garantir_estado(session_state)
     with st.container(border=True):
-        st.markdown("## Consulta e Análise Granulométrica")
+        st.markdown("## Análise Granulométrica")
         if st.button("Atualizar lista de imagens", key="btn_atualizar_lista"):
             imagens, erro = listar_imagens_supabase("")
             if erro: st.error(f"Erro: {erro}")
@@ -313,7 +313,7 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         salvar_roi(session_state, escolhido, roi_info)
         
         # Desenha apenas a ROI para ajuste
-        img_roi_setup = desenhar_roi_e_circulos(img_bgr, roi_info, [], titulo="Ajuste de ROI")
+        img_roi_setup = desenhar_resultado_estilo_referencia(img_bgr, roi_info, [], titulo="Ajuste de ROI")
         st.image(cv_to_pil(img_roi_setup), caption="Área útil circular (ROI)", width=760)
         
         # Exibe Calibração
@@ -342,9 +342,9 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             st.rerun()
             
         # RESULTADO FINAL ESTILO REFERÊNCIA
-        st.markdown("### 5. Resultado Final (Estilo Referência)")
+        st.markdown("### 5. Resultado Final")
         circles = obter_circulos(session_state, escolhido)
-        img_resultado = desenhar_roi_e_circulos(img_bgr, roi_info, circles, titulo="Granulometria de Espuma")
+        img_resultado = desenhar_resultado_estilo_referencia(img_bgr, roi_info, circles)
         st.image(cv_to_pil(img_resultado), caption="Bolhas detectadas dentro da área útil circular", width=900)
         
         # Tabela e Métricas (MANTIDAS)
