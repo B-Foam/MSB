@@ -640,9 +640,21 @@ def render_consulta_imagens(
 
     try:
         try:
-            lista_bruta = listar_imagens_supabase("")
+            retorno = listar_imagens_supabase("")
         except TypeError:
-            lista_bruta = listar_imagens_supabase()
+            retorno = listar_imagens_supabase()
+
+        if isinstance(retorno, tuple):
+            lista_bruta = retorno[0] if len(retorno) > 0 else []
+            erro = retorno[1] if len(retorno) > 1 else None
+        else:
+            lista_bruta = retorno
+            erro = None
+
+        if erro:
+            st.error(f"Erro ao listar imagens: {erro}")
+            return
+
     except Exception as e:
         st.error(f"Erro ao listar imagens: {e}")
         return
@@ -750,4 +762,5 @@ def render_consulta_imagens(
         st.image(bgr_to_rgb(img2), use_container_width=True)
         st.info(f"Bolhas detectadas: {len(bolhas)}")
     else:
+        st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
         st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
