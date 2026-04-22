@@ -1,6 +1,6 @@
 import io
-import json
-from typing import Tuple, List, Dict, Any
+import math
+from typing import Dict, List, Tuple, Any, Optional
 
 import requests
 import streamlit as st
@@ -9,14 +9,6 @@ import pandas as pd
 import cv2
 from PIL import Image
 import matplotlib.pyplot as plt
-from openai import RateLimitError
-
-from openai_bubble_service import (
-    analyze_bubbles_with_openai,
-    revise_bubbles_with_feedback,
-    filter_bubbles,
-    bubbles_to_rows,
-)
 
 
 # ============================================================
@@ -38,21 +30,42 @@ def cv_to_pil(img_cv: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
 
 
-def reduzir_imagem_bytes(img_pil: Image.Image, max_width: int = 768, fmt: str = "PNG") -> Tuple[bytes, str]:
-    img = img_pil.copy()
-    w, h = img.size
+# ============================================================
+# ESTADO
+# ============================================================
+def garantir_estado(session_state):
+    if "lista_imagens_consulta" not in session_state:
+        session_state.lista_imagens_consulta = []
 
-    if w > max_width:
-        new_h = int(h * (max_width / w))
-        img = img.resize((max_width, new_h))
+    if "circles_by_image" not in session_state:
+        session_state.circles_by_image = {}
 
-    buf = io.BytesIO()
-    img.save(buf, format=fmt)
-    return buf.getvalue(), f"image/{fmt.lower()}"
+    if "roi_by_image" not in session_state:
+        session_state.roi_by_image = {}
+
+
+def obter_circulos(session_state, image_name: str) -> List[Dict[str, Any]]:
+    garantir_estado(session_state)
+    return session_state.circles_by_image.get(image_name, [])
+
+
+def salvar_circulos(session_state, image_name: str, circles: List[Dict[str, Any]]):
+    garantir_estado(session_state)
+    session_state.circles_by_image[image_name] = circles
+
+
+def obter_roi(session_state, image_name: str) -> Optional[Dict[str, Any]]:
+    garantir_estado(session_state)
+    return session_state.roi_by_image.get(image_name)
+
+
+def salvar_roi(session_state, image_name: str, roi_info: Dict[str, Any]):
+    garantir_estado(session_state)
+    session_state.roi_by_image[image_name] = roi_info
 
 
 # ============================================================
-# CALIBRAÇÃO DA BARRA DE 1,0 mm
+# CALIBRAÇÃO DA BARRA
 # ============================================================
 def detectar_barra_escala_px(img_bgr: np.ndarray):
     img_annot = img_bgr.copy()
@@ -92,7 +105,13 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
     gy = y0 + y
 
     cv2.rectangle(img_annot, (gx, gy), (gx + ww, gy + hh), (0, 255, 0), 2)
-    cv2.line(img_annot, (gx, gy + hh // 2), (gx + ww, gy + hh // 2), (0, 255, 0), 2)
+    cv2.line(
+        img_annot,
+        (gx, gy + hh // 2),
+        (gx + ww, gy + hh // 2),
+        (0, 255, 0),
+        2
+    )
     cv2.putText(
         img_annot,
         f"1.0 mm = {ww} px",
@@ -105,26 +124,226 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
     )
 
     barra_info = {"x": gx, "y": gy, "w": ww, "h": hh}
-    return ww, img_annot, barra_info
+    return float(ww), img_annot, barra_info
 
 
 # ============================================================
-# DESENHO DOS RESULTADOS
+# ROI CIRCULAR
 # ============================================================
-def desenhar_bolhas(img_bgr: np.ndarray, bubbles: List[Dict[str, Any]]) -> np.ndarray:
+def criar_roi_circular_padrao(shape, raio_frac=0.43):
+    h, w = shape[:2]
+    cx = w // 2
+    cy = h // 2
+    r = int(min(h, w) * raio_frac)
+    return {"cx": cx, "cy": cy, "r": r}
+
+
+def criar_mascara_roi(shape, roi_info: Dict[str, Any], barra_info=None):
+    h, w = shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
+
+    # excluir cabeçalho superior
+    mask[0:int(h * 0.035), :] = 0
+
+    # excluir barra de escala
+    if barra_info is not None:
+        x = barra_info["x"]
+        y = barra_info["y"]
+        ww = barra_info["w"]
+        hh = barra_info["h"]
+
+        x_ini = max(0, x - 25)
+        y_ini = max(0, y - 60)
+        x_fim = min(w, x + ww + 90)
+        y_fim = min(h, y + hh + 20)
+
+        mask[y_ini:y_fim, x_ini:x_fim] = 0
+
+    return mask
+
+
+def ponto_dentro_roi(x: float, y: float, roi_info: Dict[str, Any], folga: float = 0.0) -> bool:
+    dx = x - roi_info["cx"]
+    dy = y - roi_info["cy"]
+    return (dx * dx + dy * dy) <= (roi_info["r"] - folga) ** 2
+
+
+# ============================================================
+# PRÉ-PROCESSAMENTO
+# ============================================================
+def preprocessar_para_candidatos(img_bgr: np.ndarray, mask_roi: np.ndarray):
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+    clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8, 8))
+    clahe_img = clahe.apply(gray)
+
+    bilateral = cv2.bilateralFilter(clahe_img, 9, 75, 75)
+
+    blur_ref = cv2.GaussianBlur(bilateral, (0, 0), 1.2)
+    sharpen = cv2.addWeighted(bilateral, 1.40, blur_ref, -0.40, 0)
+
+    roi_gray = gray.copy()
+    roi_gray[mask_roi == 0] = 0
+
+    roi_clahe = clahe_img.copy()
+    roi_clahe[mask_roi == 0] = 0
+
+    roi_sharpen = sharpen.copy()
+    roi_sharpen[mask_roi == 0] = 0
+
+    return {
+        "gray": gray,
+        "clahe": clahe_img,
+        "sharpen": sharpen,
+        "roi_gray": roi_gray,
+        "roi_clahe": roi_clahe,
+        "roi_sharpen": roi_sharpen,
+    }
+
+
+# ============================================================
+# CANDIDATOS INICIAIS
+# ============================================================
+def gerar_candidatos_iniciais(
+    img_proc: np.ndarray,
+    roi_info: Dict[str, Any],
+    px_per_mm: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    candidatos = []
+
+    if px_per_mm and px_per_mm > 0:
+        min_r = max(4, int(px_per_mm * 0.010))
+        max_r = max(12, int(px_per_mm * 0.18))
+    else:
+        min_r = 4
+        max_r = 60
+
+    circles = cv2.HoughCircles(
+        img_proc,
+        cv2.HOUGH_GRADIENT,
+        dp=1.15,
+        minDist=max(8, min_r * 2),
+        param1=100,
+        param2=16,
+        minRadius=min_r,
+        maxRadius=max_r
+    )
+
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype(int)
+        for c in circles:
+            x, y, r = int(c[0]), int(c[1]), int(c[2])
+            if ponto_dentro_roi(x, y, roi_info, folga=r + 2):
+                candidatos.append(
+                    {
+                        "x": float(x),
+                        "y": float(y),
+                        "r": float(r),
+                        "ativo": True,
+                    }
+                )
+
+    return remover_duplicados(candidatos)
+
+
+def remover_duplicados(circles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not circles:
+        return []
+
+    finais = []
+    for c in circles:
+        manter = True
+        for f in finais:
+            dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
+            r_ref = max(c["r"], f["r"])
+            if dist <= 0.8 * r_ref and abs(c["r"] - f["r"]) <= 0.6 * r_ref:
+                manter = False
+                break
+        if manter:
+            finais.append(c)
+    return finais
+
+
+# ============================================================
+# EDIÇÃO DOS CÍRCULOS
+# ============================================================
+def circles_to_dataframe(circles: List[Dict[str, Any]]) -> pd.DataFrame:
+    if not circles:
+        return pd.DataFrame(columns=["ativo", "x", "y", "r"])
+    return pd.DataFrame(circles)[["ativo", "x", "y", "r"]]
+
+
+def dataframe_to_circles(df: pd.DataFrame, roi_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    circles = []
+    for _, row in df.iterrows():
+        try:
+            ativo = bool(row["ativo"])
+            x = float(row["x"])
+            y = float(row["y"])
+            r = float(row["r"])
+        except Exception:
+            continue
+
+        if r <= 0:
+            continue
+        if not ponto_dentro_roi(x, y, roi_info, folga=r + 1):
+            continue
+
+        circles.append({
+            "ativo": ativo,
+            "x": x,
+            "y": y,
+            "r": r,
+        })
+
+    return remover_duplicados(circles)
+
+
+# ============================================================
+# DESENHO
+# ============================================================
+def desenhar_roi_e_circulos(
+    img_bgr: np.ndarray,
+    roi_info: Dict[str, Any],
+    circles: List[Dict[str, Any]],
+    titulo: str = "Bolhas"
+) -> np.ndarray:
     out = img_bgr.copy()
-    rng = np.random.default_rng(42)
 
-    for i, b in enumerate(bubbles, start=1):
+    overlay = out.copy()
+    h, w = out.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
+    overlay[mask == 0] = (15, 15, 15)
+    out = cv2.addWeighted(out, 0.65, overlay, 0.35, 0)
+
+    cv2.circle(
+        out,
+        (int(roi_info["cx"]), int(roi_info["cy"])),
+        int(roi_info["r"]),
+        (255, 255, 255),
+        2
+    )
+
+    rng = np.random.default_rng(42)
+    count_ativos = 0
+
+    for i, c in enumerate(circles, start=1):
+        if not c.get("ativo", True):
+            continue
+
+        count_ativos += 1
         color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        x = int(round(float(b["x"])))
-        y = int(round(float(b["y"])))
-        r = int(round(float(b["radius_px"])))
+        x = int(round(c["x"]))
+        y = int(round(c["y"]))
+        r = int(round(c["r"]))
 
         cv2.circle(out, (x, y), r, color, 2)
         cv2.putText(
             out,
-            str(i),
+            str(count_ativos),
             (x - 5, y + 4),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.35,
@@ -135,20 +354,46 @@ def desenhar_bolhas(img_bgr: np.ndarray, bubbles: List[Dict[str, Any]]) -> np.nd
 
     cv2.putText(
         out,
-        f"Bolhas detectadas: {len(bubbles)}",
-        (20, 35),
+        f"{titulo}: {count_ativos}",
+        (20, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
         (255, 255, 255),
         2,
         cv2.LINE_AA
     )
+
     return out
 
 
 # ============================================================
-# GRÁFICOS
+# MEDIÇÃO
 # ============================================================
+def montar_dataframe_medidas(circles: List[Dict[str, Any]], px_per_mm: Optional[float]) -> pd.DataFrame:
+    rows = []
+    idx = 1
+    for c in circles:
+        if not c.get("ativo", True):
+            continue
+
+        diam_px = 2.0 * float(c["r"])
+        diam_um = None
+        if px_per_mm and px_per_mm > 0:
+            diam_um = (diam_px / px_per_mm) * 1000.0
+
+        rows.append({
+            "Bolha": idx,
+            "Centro X (px)": round(float(c["x"]), 1),
+            "Centro Y (px)": round(float(c["y"]), 1),
+            "Raio (px)": round(float(c["r"]), 2),
+            "Diâmetro (px)": round(float(diam_px), 2),
+            "Diâmetro (µm)": None if diam_um is None else round(float(diam_um), 2),
+        })
+        idx += 1
+
+    return pd.DataFrame(rows)
+
+
 def plotar_distribuicao(df: pd.DataFrame):
     if "Diâmetro (µm)" not in df.columns or df["Diâmetro (µm)"].dropna().empty:
         return None, None, None
@@ -185,92 +430,13 @@ def plotar_distribuicao(df: pd.DataFrame):
 
 
 # ============================================================
-# FEEDBACK
-# ============================================================
-def coletar_feedback():
-    st.markdown("## Validação da detecção")
-    st.caption("0 = nada errado | 5 = muito errado")
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-
-    with c1:
-        poucas_bolhas = st.slider("Poucas bolhas", 0, 5, 0, key="fb_poucas")
-    with c2:
-        excesso_bolhas = st.slider("Excesso de bolhas", 0, 5, 0, key="fb_excesso")
-    with c3:
-        contornos_nao_ajustados = st.slider("Contornos não ajustados", 0, 5, 0, key="fb_contornos")
-    with c4:
-        bolhas_grandes_perdidas = st.slider("Bolhas grandes perdidas", 0, 5, 0, key="fb_grandes")
-    with c5:
-        bolhas_pequenas_perdidas = st.slider("Bolhas pequenas perdidas", 0, 5, 0, key="fb_pequenas")
-
-    observacao = st.text_area(
-        "Observação opcional para a IA",
-        value="",
-        key="fb_observacao",
-        placeholder="Ex.: faltaram bolhas pequenas na região central; alguns círculos ficaram muito grandes."
-    )
-
-    return {
-        "poucas_bolhas": poucas_bolhas,
-        "excesso_bolhas": excesso_bolhas,
-        "contornos_nao_ajustados": contornos_nao_ajustados,
-        "bolhas_grandes_perdidas": bolhas_grandes_perdidas,
-        "bolhas_pequenas_perdidas": bolhas_pequenas_perdidas,
-        "observacao": observacao,
-    }
-
-
-# ============================================================
-# CACHE POR IMAGEM
-# ============================================================
-def garantir_cache(session_state):
-    if "openai_results_by_image" not in session_state:
-        session_state.openai_results_by_image = {}
-
-
-def obter_resultado_cache(session_state, image_name: str):
-    garantir_cache(session_state)
-    return session_state.openai_results_by_image.get(image_name)
-
-
-def salvar_resultado_cache(session_state, image_name: str, result: Dict[str, Any]):
-    garantir_cache(session_state)
-    session_state.openai_results_by_image[image_name] = result
-
-
-# ============================================================
-# EXECUÇÃO DE ANÁLISE
-# ============================================================
-def executar_pipeline_resultado(result, img_bgr, barra_px_auto):
-    bubbles_raw = result.get("bubbles", [])
-    scale_bar_px_model = result.get("scale_bar_px", None)
-
-    min_conf = st.session_state.get("min_conf", 0.10)
-    min_radius = st.session_state.get("min_radius", 2.0)
-
-    bubbles = filter_bubbles(
-        bubbles_raw,
-        min_radius_px=min_radius,
-        min_confidence=min_conf,
-    )
-
-    px_per_mm = barra_px_auto if barra_px_auto else scale_bar_px_model
-    rows = bubbles_to_rows(bubbles, px_per_mm=px_per_mm)
-    df = pd.DataFrame(rows)
-    img_marked = desenhar_bolhas(img_bgr, bubbles)
-
-    return bubbles_raw, bubbles, px_per_mm, df, img_marked
-
-
-# ============================================================
 # TELA PRINCIPAL
 # ============================================================
 def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
-    garantir_cache(session_state)
+    garantir_estado(session_state)
 
     with st.container(border=True):
-        st.markdown("## Consulta de imagens com OpenAI API + feedback")
+        st.markdown("## Consulta de imagens sem API paga")
 
         if st.button("Atualizar lista", key="btn_atualizar_lista_consulta"):
             imagens, erro = listar_imagens_supabase("")
@@ -286,152 +452,153 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         escolhido = st.selectbox("Selecione a imagem", lista, key="select_imagem_consulta")
 
-        api_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", "")
-        if not api_key:
-            st.warning("Defina OPENAI_API_KEY em st.secrets['openai']['OPENAI_API_KEY'].")
-            return
-
-        session_state.min_conf = st.slider("Confiança mínima", 0.0, 1.0, 0.10, 0.05)
-        session_state.min_radius = st.slider("Raio mínimo (px)", 1.0, 20.0, 2.0, 0.5)
-        model_name = st.text_input("Modelo", value="gpt-5.4")
-
         url_imagem = montar_url_publica(escolhido)
         img_pil = baixar_imagem(url_imagem)
         img_bgr = pil_to_cv(img_pil)
 
-        # largura reduzida para 768 px
-        img_bytes, mime_type = reduzir_imagem_bytes(img_pil, max_width=768, fmt="PNG")
+        px_per_mm, img_calibracao, barra_info = detectar_barra_escala_px(img_bgr)
 
-        barra_px_auto, img_calibracao, _ = detectar_barra_escala_px(img_bgr)
+        roi_info = obter_roi(session_state, escolhido)
+        if roi_info is None:
+            roi_info = criar_roi_circular_padrao(img_bgr.shape, raio_frac=0.43)
+            salvar_roi(session_state, escolhido, roi_info)
 
-        resultado_cache = obter_resultado_cache(session_state, escolhido)
+        # ---------------- ROI ----------------
+        st.markdown("## Área útil circular")
 
-        c1, c2, c3 = st.columns(3)
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            roi_cx = st.number_input("Centro X ROI", min_value=0, max_value=int(img_bgr.shape[1]), value=int(roi_info["cx"]), step=1)
+        with r2:
+            roi_cy = st.number_input("Centro Y ROI", min_value=0, max_value=int(img_bgr.shape[0]), value=int(roi_info["cy"]), step=1)
+        with r3:
+            roi_r = st.number_input("Raio ROI", min_value=10, max_value=int(min(img_bgr.shape[:2])), value=int(roi_info["r"]), step=1)
 
-        with c1:
-            if st.button("Análise inicial com OpenAI", key="btn_openai_analisar"):
-                if resultado_cache is not None:
-                    st.info("Esta imagem já possui análise salva no cache desta sessão.")
-                else:
-                    try:
-                        with st.spinner("Enviando imagem para a OpenAI API..."):
-                            result = analyze_bubbles_with_openai(
-                                api_key=api_key,
-                                image_bytes=img_bytes,
-                                mime_type=mime_type,
-                                model=model_name,
-                            )
-                            salvar_resultado_cache(session_state, escolhido, result)
-                            resultado_cache = result
-                    except RateLimitError:
-                        st.error(
-                            "A OpenAI API atingiu o limite de requisições/tokens no momento. "
-                            "Espere um pouco e tente novamente."
-                        )
-                        return
+        roi_info = {"cx": roi_cx, "cy": roi_cy, "r": roi_r}
+        salvar_roi(session_state, escolhido, roi_info)
 
-        with c2:
-            if st.button("Recarregar análise salva", key="btn_recarregar_cache"):
-                resultado_cache = obter_resultado_cache(session_state, escolhido)
-                if resultado_cache is None:
-                    st.warning("Ainda não existe análise salva para esta imagem nesta sessão.")
-                else:
-                    st.success("Análise carregada do cache da sessão.")
+        mask_roi = criar_mascara_roi(img_bgr.shape, roi_info, barra_info=barra_info)
+        prep = preprocessar_para_candidatos(img_bgr, mask_roi)
 
-        with c3:
-            if st.button("Limpar análise salva", key="btn_limpar_cache"):
-                if escolhido in session_state.openai_results_by_image:
-                    del session_state.openai_results_by_image[escolhido]
-                    st.success("Análise removida do cache da sessão.")
-                    st.rerun()
-
-        resultado_cache = obter_resultado_cache(session_state, escolhido)
-
-        if resultado_cache is None:
-            st.info("Execute a análise inicial para ver o resultado.")
-            return
-
-        result = resultado_cache
-
-        bubbles_raw, bubbles, px_per_mm, df, img_marked = executar_pipeline_resultado(
-            result, img_bgr, barra_px_auto
+        img_roi_preview = desenhar_roi_e_circulos(
+            img_bgr,
+            roi_info,
+            obter_circulos(session_state, escolhido),
+            titulo="ROI circular"
         )
 
+        st.image(cv_to_pil(img_roi_preview), caption="Pré-visualização da ROI circular", width=760)
+
+        # ---------------- calibração ----------------
         st.markdown("## Calibração")
-        if barra_px_auto:
-            st.success(f"Barra detectada localmente: {barra_px_auto:.2f} px")
-        elif px_per_mm:
-            st.info(f"Barra estimada pela IA: {float(px_per_mm):.2f} px")
+        if px_per_mm:
+            st.success(f"Barra detectada: {px_per_mm:.2f} px para 1,0 mm")
         else:
-            st.warning("Não foi possível calibrar a escala automaticamente.")
+            st.warning("A barra de 1,0 mm não foi detectada automaticamente.")
 
-        st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm", width=420)
+        st.image(cv_to_pil(img_calibracao), caption="Detecção da barra de escala", width=420)
 
-        st.markdown("## Imagem marcada pela IA")
-        st.image(cv_to_pil(img_marked), width=900)
+        # ---------------- candidatos iniciais ----------------
+        st.markdown("## Candidatos iniciais")
 
-        st.markdown("## JSON bruto retornado pela IA")
-        with st.expander("Ver JSON"):
-            st.code(json.dumps(result, indent=2, ensure_ascii=False), language="json")
-
-        st.markdown("## Resumo textual da IA")
-        st.write(result.get("image_summary", ""))
-
-        st.markdown("## Diagnóstico")
         c1, c2 = st.columns(2)
-        c1.metric("Bolhas retornadas pela IA", len(bubbles_raw))
-        c2.metric("Bolhas após filtros", len(bubbles))
+        with c1:
+            if st.button("Gerar candidatos iniciais", key="btn_gerar_candidatos"):
+                candidatos = gerar_candidatos_iniciais(prep["roi_sharpen"], roi_info, px_per_mm)
+                salvar_circulos(session_state, escolhido, candidatos)
+                st.success(f"{len(candidatos)} candidatos gerados.")
+                st.rerun()
 
-        feedback = coletar_feedback()
+        with c2:
+            if st.button("Limpar todos os círculos", key="btn_limpar_circulos"):
+                salvar_circulos(session_state, escolhido, [])
+                st.success("Círculos removidos.")
+                st.rerun()
 
-        # revisão só é permitida se já existir análise salva
-        if st.button("Revisar com feedback", key="btn_openai_revisar"):
-            try:
-                with st.spinner("Enviando feedback para revisão da OpenAI..."):
-                    revised = revise_bubbles_with_feedback(
-                        api_key=api_key,
-                        image_bytes=img_bytes,
-                        previous_result=result,
-                        feedback=feedback,
-                        mime_type=mime_type,
-                        model=model_name,
-                    )
-                    salvar_resultado_cache(session_state, escolhido, revised)
-                    st.success("Resultado revisado e salvo no cache.")
+        circles = obter_circulos(session_state, escolhido)
+
+        # ---------------- adicionar manualmente ----------------
+        st.markdown("## Adicionar bolha manualmente")
+        a1, a2, a3, a4 = st.columns(4)
+        with a1:
+            novo_x = st.number_input("X", min_value=0.0, max_value=float(img_bgr.shape[1]), value=float(roi_info["cx"]), step=1.0, key="novo_x")
+        with a2:
+            novo_y = st.number_input("Y", min_value=0.0, max_value=float(img_bgr.shape[0]), value=float(roi_info["cy"]), step=1.0, key="novo_y")
+        with a3:
+            novo_r = st.number_input("Raio", min_value=1.0, max_value=float(min(img_bgr.shape[:2])), value=10.0, step=1.0, key="novo_r")
+        with a4:
+            st.write("")
+            st.write("")
+            if st.button("Adicionar círculo", key="btn_add_circle"):
+                if ponto_dentro_roi(novo_x, novo_y, roi_info, folga=novo_r + 1):
+                    circles.append({"ativo": True, "x": novo_x, "y": novo_y, "r": novo_r})
+                    circles = remover_duplicados(circles)
+                    salvar_circulos(session_state, escolhido, circles)
+                    st.success("Círculo adicionado.")
                     st.rerun()
-            except RateLimitError:
-                st.error(
-                    "A OpenAI API atingiu o limite de requisições/tokens no momento. "
-                    "Espere um pouco e tente novamente."
-                )
-                return
+                else:
+                    st.warning("O círculo precisa ficar totalmente dentro da ROI.")
 
-        if df.empty:
-            st.warning("A IA não retornou bolhas válidas com os filtros atuais.")
+        # ---------------- edição por tabela ----------------
+        st.markdown("## Editar / remover círculos")
+        df_edit = circles_to_dataframe(circles)
+
+        edited_df = st.data_editor(
+            df_edit,
+            use_container_width=True,
+            num_rows="dynamic",
+            key=f"editor_circulos_{escolhido}"
+        )
+
+        if st.button("Salvar edição dos círculos", key="btn_salvar_edicao"):
+            novos = dataframe_to_circles(edited_df, roi_info)
+            salvar_circulos(session_state, escolhido, novos)
+            st.success("Edição salva.")
+            st.rerun()
+
+        circles = obter_circulos(session_state, escolhido)
+
+        # ---------------- imagem final ----------------
+        st.markdown("## Resultado final")
+        img_resultado = desenhar_roi_e_circulos(
+            img_bgr,
+            roi_info,
+            circles,
+            titulo="Bolhas"
+        )
+        st.image(cv_to_pil(img_resultado), width=900)
+
+        # ---------------- medidas ----------------
+        df_med = montar_dataframe_medidas(circles, px_per_mm)
+
+        if df_med.empty:
+            st.info("Nenhuma bolha ativa cadastrada.")
             return
 
-        st.markdown("## Tabela")
-        st.dataframe(df, use_container_width=True)
+        st.markdown("## Tabela automática")
+        st.dataframe(df_med, use_container_width=True)
 
-        if "Diâmetro (µm)" in df.columns and not df["Diâmetro (µm)"].dropna().empty:
-            maiores_500 = df[df["Diâmetro (µm)"] > 500]
-            pct_500 = 100.0 * len(maiores_500) / len(df)
+        if "Diâmetro (µm)" in df_med.columns and not df_med["Diâmetro (µm)"].dropna().empty:
+            maiores_500 = df_med[df_med["Diâmetro (µm)"] > 500]
+            pct_500 = 100.0 * len(maiores_500) / len(df_med)
 
             s1, s2, s3, s4 = st.columns(4)
-            s1.metric("Bolhas totais", len(df))
+            s1.metric("Bolhas totais", len(df_med))
             s2.metric("Bolhas > 500 µm", len(maiores_500))
             s3.metric("% > 500 µm", f"{pct_500:.2f}%")
-            s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+            s4.metric("Diâmetro médio (µm)", f"{df_med['Diâmetro (µm)'].mean():.2f}")
 
             e1, e2 = st.columns(2)
-            e1.metric("Mediana (µm)", f"{df['Diâmetro (µm)'].median():.2f}")
-            e2.metric("Máximo (µm)", f"{df['Diâmetro (µm)'].max():.2f}")
+            e1.metric("Mediana (µm)", f"{df_med['Diâmetro (µm)'].median():.2f}")
+            e2.metric("Máximo (µm)", f"{df_med['Diâmetro (µm)'].max():.2f}")
 
-            fig_bar, fig_curve, tabela = plotar_distribuicao(df)
+            fig_bar, fig_curve, tabela = plotar_distribuicao(df_med)
             if fig_bar is not None:
-                st.markdown("## Distribuição granulométrica")
+                st.markdown("## Histograma")
                 st.pyplot(fig_bar)
+
                 st.markdown("## Curva")
                 st.pyplot(fig_curve)
+
                 st.markdown("## Quantidade por faixa")
                 st.dataframe(tabela, use_container_width=True)
