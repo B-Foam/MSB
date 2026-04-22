@@ -103,8 +103,10 @@ def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
+    # texto superior
     mask[0:int(h * 0.035), :] = 255
 
+    # barra de escala
     if barra_info is not None:
         x = barra_info["x"]
         y = barra_info["y"]
@@ -150,210 +152,242 @@ def preprocessar_base(img_bgr: np.ndarray, mask_roi: np.ndarray):
     bilateral = cv2.bilateralFilter(clahe_img, 9, 75, 75)
 
     blur_ref = cv2.GaussianBlur(bilateral, (0, 0), 1.2)
-    sharpen = cv2.addWeighted(bilateral, 1.40, blur_ref, -0.40, 0)
+    sharpen = cv2.addWeighted(bilateral, 1.35, blur_ref, -0.35, 0)
 
-    roi_gray = aplicar_roi(gray, mask_roi, valor_fora=0)
-    roi_clahe = aplicar_roi(clahe_img, mask_roi, valor_fora=0)
-    roi_bilateral = aplicar_roi(bilateral, mask_roi, valor_fora=0)
-    roi_sharpen = aplicar_roi(sharpen, mask_roi, valor_fora=0)
+    gray_roi = aplicar_roi(gray, mask_roi, valor_fora=0)
+    clahe_roi = aplicar_roi(clahe_img, mask_roi, valor_fora=0)
+    bilateral_roi = aplicar_roi(bilateral, mask_roi, valor_fora=0)
+    sharpen_roi = aplicar_roi(sharpen, mask_roi, valor_fora=0)
 
     return {
         "gray_vis": gray,
         "clahe_vis": clahe_img,
         "bilateral_vis": bilateral,
         "sharpen_vis": sharpen,
-        "gray_roi": roi_gray,
-        "clahe_roi": roi_clahe,
-        "bilateral_roi": roi_bilateral,
-        "sharpen_roi": roi_sharpen
+        "gray_roi": gray_roi,
+        "clahe_roi": clahe_roi,
+        "bilateral_roi": bilateral_roi,
+        "sharpen_roi": sharpen_roi
     }
 
 
 # ============================================================
-# SIMPLE BLOB DETECTOR
+# WATERSHED
 # ============================================================
-def criar_blob_detector(min_area=20, max_area=8000):
-    params = cv2.SimpleBlobDetector_Params()
+def detectar_bolhas_watershed(img_gray, mask_roi, marker_factor=0.28):
+    img_roi = cv2.bitwise_and(img_gray, img_gray, mask=mask_roi)
 
-    params.filterByArea = True
-    params.minArea = float(min_area)
-    params.maxArea = float(max_area)
+    thresh = cv2.adaptiveThreshold(
+        img_roi,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        21,
+        5
+    )
 
-    params.filterByCircularity = True
-    params.minCircularity = 0.35
+    thresh[mask_roi == 0] = 0
 
-    params.filterByConvexity = True
-    params.minConvexity = 0.55
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    opening = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    params.filterByInertia = True
-    params.minInertiaRatio = 0.20
+    dist = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
+    dist_norm = cv2.normalize(dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    params.filterByColor = False
+    _, sure_fg = cv2.threshold(dist, marker_factor * dist.max(), 255, 0)
+    sure_fg = np.uint8(sure_fg)
 
-    params.minThreshold = 5
-    params.maxThreshold = 220
-    params.thresholdStep = 5
+    sure_bg = cv2.dilate(opening, kernel, iterations=2)
+    unknown = cv2.subtract(sure_bg, sure_fg)
 
-    return cv2.SimpleBlobDetector_create(params)
+    _, markers = cv2.connectedComponents(sure_fg)
+    markers = markers + 1
+    markers[unknown == 255] = 0
+    markers[mask_roi == 0] = 1
+
+    img_bgr = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
+    markers = cv2.watershed(img_bgr, markers)
+
+    return {
+        "thresh": thresh,
+        "opening": opening,
+        "dist_norm": dist_norm,
+        "sure_fg": sure_fg,
+        "sure_bg": sure_bg,
+        "markers": markers
+    }
 
 
-def detectar_blobs_em_imagem(img_gray, nome_canal, detector):
-    keypoints = detector.detect(img_gray)
-    candidatos = []
+# ============================================================
+# EXTRAÇÃO DAS BOLHAS
+# ============================================================
+def extrair_bolhas_dos_markers(markers, shape, roi_info, px_per_mm=None):
+    h, w = shape[:2]
+    bolhas = []
 
-    for kp in keypoints:
-        x = float(kp.pt[0])
-        y = float(kp.pt[1])
-        d = float(kp.size)
-        r = d / 2.0
+    labels_unicos = np.unique(markers)
 
-        if r < 3:
+    for label in labels_unicos:
+        if label <= 1:
             continue
 
-        candidatos.append({
-            "x": x,
-            "y": y,
-            "r": r,
-            "score": float(kp.response) if kp.response is not None else 0.0,
-            "canal": nome_canal
+        mask_bolha = np.zeros((h, w), dtype=np.uint8)
+        mask_bolha[markers == label] = 255
+
+        cnts, _ = cv2.findContours(mask_bolha, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            continue
+
+        cnt = max(cnts, key=cv2.contourArea)
+        area = cv2.contourArea(cnt)
+
+        if area < 40:
+            continue
+
+        peri = cv2.arcLength(cnt, True)
+        if peri <= 0:
+            continue
+
+        circularidade = 4 * np.pi * area / (peri * peri)
+
+        hull = cv2.convexHull(cnt)
+        area_hull = cv2.contourArea(hull)
+        if area_hull <= 0:
+            continue
+
+        solidez = area / area_hull
+
+        x, y, ww, hh = cv2.boundingRect(cnt)
+
+        # centroide
+        M = cv2.moments(cnt)
+        if M["m00"] == 0:
+            continue
+
+        cx = M["m10"] / M["m00"]
+        cy = M["m01"] / M["m00"]
+
+        # dentro da ROI circular com folga
+        dx = cx - roi_info["cx"]
+        dy = cy - roi_info["cy"]
+        dist_centro = math.hypot(dx, dy)
+        if dist_centro > roi_info["r"] - 5:
+            continue
+
+        # medida principal: diâmetro equivalente
+        diam_eq_px = math.sqrt((4.0 * area) / math.pi)
+        raio_eq_px = diam_eq_px / 2.0
+
+        # filtros físicos
+        if diam_eq_px < 8:
+            continue
+        if circularidade < 0.15:
+            continue
+        if solidez < 0.35:
+            continue
+
+        diam_eq_um = None
+        if px_per_mm is not None and px_per_mm > 0:
+            diam_eq_um = (diam_eq_px / px_per_mm) * 1000.0
+
+        bolhas.append({
+            "contorno": cnt,
+            "area_px2": float(area),
+            "circularidade": float(circularidade),
+            "solidez": float(solidez),
+            "cx": float(cx),
+            "cy": float(cy),
+            "raio_eq_px": float(raio_eq_px),
+            "diam_eq_px": float(diam_eq_px),
+            "diam_eq_um": None if diam_eq_um is None else float(diam_eq_um)
         })
 
-    return candidatos
-
-
-def detectar_blobs_multicanal(prep, px_per_mm=None):
-    if px_per_mm is not None and px_per_mm > 0:
-        min_area = max(15, int(math.pi * (px_per_mm * 0.010) ** 2))
-        max_area = int(math.pi * (px_per_mm * 0.20) ** 2)
-    else:
-        min_area = 20
-        max_area = 8000
-
-    detector = criar_blob_detector(min_area=min_area, max_area=max_area)
-
-    c1 = detectar_blobs_em_imagem(prep["clahe_roi"], "CLAHE", detector)
-    c2 = detectar_blobs_em_imagem(prep["bilateral_roi"], "Bilateral", detector)
-    c3 = detectar_blobs_em_imagem(prep["sharpen_roi"], "Sharpen", detector)
-
-    return c1 + c2 + c3
+    return bolhas
 
 
 # ============================================================
-# FILTROS E DUPLICATAS
+# DESENHO
 # ============================================================
-def dentro_roi_circular(x, y, roi_info, folga=0):
-    dx = x - roi_info["cx"]
-    dy = y - roi_info["cy"]
-    return (dx * dx + dy * dy) <= (roi_info["r"] - folga) ** 2
+def desenhar_markers_coloridos(markers):
+    labels = markers.copy()
+    labels[labels < 0] = 0
+
+    max_label = np.max(labels)
+    if max_label <= 0:
+        return np.zeros((labels.shape[0], labels.shape[1], 3), dtype=np.uint8)
+
+    norm = (labels.astype(np.float32) / max_label * 255).astype(np.uint8)
+    color = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+    color[markers == -1] = [255, 255, 255]
+    return color
 
 
-def filtrar_candidatos_roi(candidatos, roi_info, px_per_mm=None):
-    finais = []
+def desenhar_roi_e_bolhas(img_bgr, roi_info, bolhas, titulo="Bolhas detectadas"):
+    out = img_bgr.copy()
 
-    if px_per_mm is not None and px_per_mm > 0:
-        rmin = max(3.5, px_per_mm * 0.010)
-        rmax = px_per_mm * 0.18
-    else:
-        rmin = 4.0
-        rmax = 60.0
+    overlay = out.copy()
+    h, w = out.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (roi_info["cx"], roi_info["cy"]), roi_info["r"], 255, -1)
+    overlay[mask == 0] = (15, 15, 15)
+    out = cv2.addWeighted(out, 0.60, overlay, 0.40, 0)
 
-    for c in candidatos:
-        if c["r"] < rmin or c["r"] > rmax:
-            continue
+    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
 
-        if not dentro_roi_circular(c["x"], c["y"], roi_info, folga=int(c["r"] + 3)):
-            continue
-
-        finais.append(c)
-
-    return finais
-
-
-def agrupar_candidatos(candidatos):
-    grupos = []
-    usados = [False] * len(candidatos)
-
-    for i, ci in enumerate(candidatos):
-        if usados[i]:
-            continue
-
-        grupo = [i]
-        usados[i] = True
-        mudou = True
-
-        while mudou:
-            mudou = False
-            for j, cj in enumerate(candidatos):
-                if usados[j]:
-                    continue
-
-                for idx in grupo:
-                    ck = candidatos[idx]
-                    dist = math.hypot(ck["x"] - cj["x"], ck["y"] - cj["y"])
-                    r_ref = max(ck["r"], cj["r"])
-                    dr = abs(ck["r"] - cj["r"])
-
-                    if dist <= 0.9 * r_ref and dr <= 0.7 * r_ref:
-                        grupo.append(j)
-                        usados[j] = True
-                        mudou = True
-                        break
-
-        grupos.append([candidatos[k] for k in grupo])
-
-    return grupos
-
-
-def escolher_melhor_do_grupo(grupo):
-    prioridade = {"Sharpen": 3, "Bilateral": 2, "CLAHE": 1}
-
-    def score(c):
-        return (
-            2.0 * c["r"] +
-            10.0 * c["score"] +
-            prioridade.get(c["canal"], 0)
+    rng = np.random.default_rng(42)
+    for i, b in enumerate(bolhas, start=1):
+        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
+        cv2.drawContours(out, [b["contorno"]], -1, color, 2)
+        cv2.putText(
+            out,
+            str(i),
+            (int(round(b["cx"] - 6)), int(round(b["cy"] + 4))),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            color,
+            1,
+            cv2.LINE_AA
         )
 
-    return max(grupo, key=score)
-
-
-def manter_melhor_por_grupo(candidatos):
-    if not candidatos:
-        return []
-
-    grupos = agrupar_candidatos(candidatos)
-    return [escolher_melhor_do_grupo(g) for g in grupos]
+    cv2.putText(
+        out,
+        f"{titulo}: {len(bolhas)}",
+        (20, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA
+    )
+    return out
 
 
 # ============================================================
-# MEDIÇÃO
+# TABELA E GRÁFICOS
 # ============================================================
-def montar_dataframe_bolhas(candidatos, px_per_mm):
+def montar_dataframe_bolhas(bolhas):
     dados = []
-    for i, c in enumerate(candidatos, start=1):
-        diam_px = 2.0 * c["r"]
-        diam_um = None
-        if px_per_mm is not None and px_per_mm > 0:
-            diam_um = (diam_px / px_per_mm) * 1000.0
-
+    for i, b in enumerate(bolhas, start=1):
         dados.append({
             "Bolha": i,
-            "Centro X (px)": round(float(c["x"]), 1),
-            "Centro Y (px)": round(float(c["y"]), 1),
-            "Raio (px)": round(float(c["r"]), 2),
-            "Diâmetro (px)": round(float(diam_px), 2),
-            "Diâmetro (µm)": None if diam_um is None else round(float(diam_um), 2),
-            "Canal": c["canal"]
+            "Centro X (px)": round(float(b["cx"]), 1),
+            "Centro Y (px)": round(float(b["cy"]), 1),
+            "Área (px²)": round(float(b["area_px2"]), 2),
+            "Circularidade": round(float(b["circularidade"]), 3),
+            "Solidez": round(float(b["solidez"]), 3),
+            "Raio equivalente (px)": round(float(b["raio_eq_px"]), 2),
+            "Diâmetro equivalente (px)": round(float(b["diam_eq_px"]), 2),
+            "Diâmetro equivalente (µm)": None if b["diam_eq_um"] is None else round(float(b["diam_eq_um"]), 2)
         })
-
     return pd.DataFrame(dados)
 
 
 def plotar_distribuicao(df):
-    if "Diâmetro (µm)" not in df.columns or df["Diâmetro (µm)"].dropna().empty:
+    if "Diâmetro equivalente (µm)" not in df.columns or df["Diâmetro equivalente (µm)"].dropna().empty:
         return None, None, None
 
-    diametros = df["Diâmetro (µm)"].dropna().values
+    diametros = df["Diâmetro equivalente (µm)"].dropna().values
     max_d = max(600, int(np.ceil(diametros.max() / 100.0) * 100))
     bins = list(range(0, max_d + 100, 100))
 
@@ -385,79 +419,6 @@ def plotar_distribuicao(df):
 
 
 # ============================================================
-# DESENHO
-# ============================================================
-def desenhar_roi_e_bolhas(img_bgr, roi_info, bolhas, titulo="Bolhas detectadas"):
-    out = img_bgr.copy()
-
-    overlay = out.copy()
-    h, w = out.shape[:2]
-    mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.circle(mask, (roi_info["cx"], roi_info["cy"]), roi_info["r"], 255, -1)
-    overlay[mask == 0] = (15, 15, 15)
-    out = cv2.addWeighted(out, 0.60, overlay, 0.40, 0)
-
-    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
-
-    rng = np.random.default_rng(42)
-    for i, b in enumerate(bolhas, start=1):
-        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        cv2.circle(out, (int(round(b["x"])), int(round(b["y"]))), int(round(b["r"])), color, 2)
-        cv2.putText(
-            out,
-            str(i),
-            (int(round(b["x"] - 6)), int(round(b["y"] + 4))),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            color,
-            1,
-            cv2.LINE_AA
-        )
-
-    cv2.putText(
-        out,
-        f"{titulo}: {len(bolhas)}",
-        (20, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA
-    )
-    return out
-
-
-def desenhar_candidatos(img_bgr, roi_info, candidatos, titulo):
-    out = img_bgr.copy()
-
-    overlay = out.copy()
-    h, w = out.shape[:2]
-    mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.circle(mask, (roi_info["cx"], roi_info["cy"]), roi_info["r"], 255, -1)
-    overlay[mask == 0] = (15, 15, 15)
-    out = cv2.addWeighted(out, 0.60, overlay, 0.40, 0)
-
-    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
-
-    rng = np.random.default_rng(7)
-    for c in candidatos:
-        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        cv2.circle(out, (int(round(c["x"])), int(round(c["y"]))), int(round(c["r"])), color, 1)
-
-    cv2.putText(
-        out,
-        f"{titulo}: {len(candidatos)}",
-        (20, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA
-    )
-    return out
-
-
-# ============================================================
 # TELA PRINCIPAL
 # ============================================================
 def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
@@ -478,6 +439,12 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         if not escolhido:
             return
 
+        marker_factor = st.selectbox(
+            "Sensibilidade interna do Watershed",
+            [0.20, 0.28, 0.35],
+            index=1
+        )
+
         try:
             url_imagem = montar_url_publica(escolhido)
             img_original_pil = baixar_imagem(url_imagem)
@@ -491,15 +458,23 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
             prep = preprocessar_base(img_original_bgr, mask_roi)
 
-            candidatos_brutos = detectar_blobs_multicanal(prep, barra_px_auto)
-            candidatos_filtrados = filtrar_candidatos_roi(candidatos_brutos, roi_info, barra_px_auto)
-            bolhas_finais = manter_melhor_por_grupo(candidatos_filtrados)
+            ws = detectar_bolhas_watershed(prep["gray_roi"], mask_roi, marker_factor=marker_factor)
+            bolhas_finais = extrair_bolhas_dos_markers(
+                ws["markers"],
+                img_original_bgr.shape,
+                roi_info,
+                px_per_mm=barra_px_auto
+            )
 
-            img_brutos = desenhar_candidatos(img_original_bgr, roi_info, candidatos_brutos, "Candidatos brutos")
-            img_filtrados = desenhar_candidatos(img_original_bgr, roi_info, candidatos_filtrados, "Após filtros")
-            img_resultado = desenhar_roi_e_bolhas(img_original_bgr, roi_info, bolhas_finais, "Bolhas detectadas")
+            img_markers = desenhar_markers_coloridos(ws["markers"])
+            img_resultado = desenhar_roi_e_bolhas(
+                img_original_bgr,
+                roi_info,
+                bolhas_finais,
+                titulo="Bolhas detectadas"
+            )
 
-            df = montar_dataframe_bolhas(bolhas_finais, barra_px_auto)
+            df = montar_dataframe_bolhas(bolhas_finais)
 
             st.markdown("## Calibração")
             if barra_px_auto is not None:
@@ -524,23 +499,22 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                 st.caption("Sharpen")
                 st.image(prep["sharpen_vis"], width=190)
 
-            st.markdown("## Diagnóstico")
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Candidatos brutos", len(candidatos_brutos))
-            d2.metric("Após filtros", len(candidatos_filtrados))
-            d3.metric("Bolhas detectadas", len(bolhas_finais))
+            st.markdown("## Watershed na área útil circular")
+            w1, w2, w3 = st.columns(3)
+            with w1:
+                st.caption("Threshold")
+                st.image(ws["thresh"], width=240)
+            with w2:
+                st.caption("Mapa de distância")
+                st.image(ws["dist_norm"], width=240)
+            with w3:
+                st.caption("Markers")
+                st.image(cv_to_pil(img_markers), width=240)
 
-            st.markdown("## Estratégia com área útil circular")
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                st.caption("Candidatos brutos")
-                st.image(cv_to_pil(img_brutos), width=250)
-            with r2:
-                st.caption("Após filtros")
-                st.image(cv_to_pil(img_filtrados), width=250)
-            with r3:
-                st.caption("Resultado final")
-                st.image(cv_to_pil(img_resultado), width=250)
+            st.markdown("## Diagnóstico")
+            d1, d2 = st.columns(2)
+            d1.metric("Marker factor", marker_factor)
+            d2.metric("Bolhas detectadas", len(bolhas_finais))
 
             st.markdown("## Resultado final na área útil circular")
             st.image(cv_to_pil(img_resultado), width=760)
@@ -552,20 +526,20 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
             st.dataframe(df, use_container_width=True)
 
-            if "Diâmetro (µm)" in df.columns and not df["Diâmetro (µm)"].dropna().empty:
-                maiores_500 = df[df["Diâmetro (µm)"] > 500]
+            if "Diâmetro equivalente (µm)" in df.columns and not df["Diâmetro equivalente (µm)"].dropna().empty:
+                maiores_500 = df[df["Diâmetro equivalente (µm)"] > 500]
                 pct_500 = 100.0 * len(maiores_500) / len(df)
 
                 s1, s2, s3, s4 = st.columns(4)
                 s1.metric("Bolhas totais", len(df))
                 s2.metric("Bolhas > 500 µm", len(maiores_500))
                 s3.metric("% > 500 µm", f"{pct_500:.2f}%")
-                s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+                s4.metric("Diâmetro médio (µm)", f"{df['Diâmetro equivalente (µm)'].mean():.2f}")
 
                 st.markdown("## Estatísticas")
                 e1, e2 = st.columns(2)
-                e1.metric("Mediana (µm)", f"{df['Diâmetro (µm)'].median():.2f}")
-                e2.metric("Máximo (µm)", f"{df['Diâmetro (µm)'].max():.2f}")
+                e1.metric("Mediana (µm)", f"{df['Diâmetro equivalente (µm)'].median():.2f}")
+                e2.metric("Máximo (µm)", f"{df['Diâmetro equivalente (µm)'].max():.2f}")
 
                 fig_bar, fig_curve, tabela = plotar_distribuicao(df)
                 if fig_bar is not None:
@@ -575,3 +549,5 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                     st.pyplot(fig_curve)
                     st.markdown("## Quantidade por faixa")
                     st.dataframe(tabela, use_container_width=True)
+        except Exception as e:
+            st.error(f"Erro ao carregar/processar a imagem: {e}")
