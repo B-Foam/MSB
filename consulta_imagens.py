@@ -1,6 +1,6 @@
 import io
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import cv2
 import numpy as np
@@ -10,12 +10,18 @@ from PIL import Image
 
 
 # ============================================================
-# UTILITÁRIOS
+# CACHE / UTILITÁRIOS
 # ============================================================
-def baixar_imagem(url: str) -> Image.Image:
+@st.cache_data(show_spinner=False)
+def baixar_imagem_bytes(url: str) -> bytes:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
-    return Image.open(io.BytesIO(response.content)).convert("RGB")
+    return response.content
+
+
+def abrir_imagem(url: str) -> Image.Image:
+    data = baixar_imagem_bytes(url)
+    return Image.open(io.BytesIO(data)).convert("RGB")
 
 
 def pil_to_cv(img_pil: Image.Image) -> np.ndarray:
@@ -63,7 +69,6 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
         x, y, ww, hh = cv2.boundingRect(cnt)
         aspect = ww / max(hh, 1)
         area = ww * hh
-
         if ww > 60 and hh < 25 and aspect > 4.5 and area > melhor_area:
             melhor_area = area
             melhor = (x, y, ww, hh)
@@ -109,9 +114,11 @@ def criar_mascara_roi(shape, roi_info: Dict[str, int], barra_info=None):
 
     cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
 
+    # remove faixa superior
     topo = int(h * 0.045)
     mask[:topo, :] = 0
 
+    # remove área da barra
     if barra_info is not None:
         x, y, ww, hh = barra_info["x"], barra_info["y"], barra_info["w"], barra_info["h"]
         x_ini = max(0, x - 20)
@@ -126,43 +133,38 @@ def criar_mascara_roi(shape, roi_info: Dict[str, int], barra_info=None):
 def ponto_totalmente_dentro_roi(x: float, y: float, r: float, roi_info: Dict[str, int]) -> bool:
     dx = x - roi_info["cx"]
     dy = y - roi_info["cy"]
-    dist = math.hypot(dx, dy)
-    return dist + r <= roi_info["r"]
+    return math.hypot(dx, dy) + r <= roi_info["r"]
 
 
 # ============================================================
-# PRÉ-PROCESSAMENTO RÁPIDO
+# PRÉ-PROCESSAMENTO LEVE
 # ============================================================
-def preprocessar_rapido(img_bgr: np.ndarray, mask_roi: np.ndarray):
+def preprocessar_leve(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray[mask_roi == 0] = 0
 
-    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-    clahe_img = clahe.apply(gray)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
 
-    bilateral = cv2.bilateralFilter(clahe_img, 7, 60, 60)
+    # filtro leve
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
+    # black-hat simples
     blackhat = cv2.morphologyEx(
-        bilateral,
+        gray,
         cv2.MORPH_BLACKHAT,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
     )
     blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    _, mask = cv2.threshold(blackhat, 28, 255, cv2.THRESH_BINARY)
-    mask[mask_roi == 0] = 0
     blackhat[mask_roi == 0] = 0
 
-    return {
-        "blackhat": blackhat,
-        "mask": mask,
-    }
+    return blackhat
 
 
 # ============================================================
-# CROP DA ROI PARA DETECÇÃO
+# CROP DA ROI
 # ============================================================
-def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale: float = 0.5):
+def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale: float = 0.45):
     cx, cy, r = roi_info["cx"], roi_info["cy"], roi_info["r"]
 
     x0 = max(0, int(cx - r))
@@ -181,48 +183,9 @@ def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale:
 
 
 # ============================================================
-# SCORE SIMPLES
+# FUSÃO
 # ============================================================
-def score_circulo_rapido(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
-    x = int(round(x))
-    y = int(round(y))
-    r = int(round(r))
-
-    if r < 3:
-        return 0.0
-
-    h, w = ref_img.shape[:2]
-    pad = int(r * 1.4) + 3
-
-    x0 = max(0, x - pad)
-    x1 = min(w, x + pad + 1)
-    y0 = max(0, y - pad)
-    y1 = min(h, y + pad + 1)
-
-    crop = ref_img[y0:y1, x0:x1]
-    if crop.size == 0:
-        return 0.0
-
-    yy, xx = np.indices(crop.shape)
-    xx = xx + x0
-    yy = yy + y0
-    dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
-
-    anel = (dist >= int(r * 0.80)) & (dist <= int(r * 1.15))
-    centro = dist <= int(r * 0.55)
-
-    if np.count_nonzero(anel) < 8 or np.count_nonzero(centro) < 8:
-        return 0.0
-
-    mean_anel = float(np.mean(crop[anel]))
-    mean_centro = float(np.mean(crop[centro]))
-    return mean_anel - 0.28 * mean_centro
-
-
-# ============================================================
-# FUSÃO MAIS RÁPIDA
-# ============================================================
-def fundir_candidatos_rapido(candidatos: List[Dict]) -> List[Dict]:
+def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
     if not candidatos:
         return []
 
@@ -234,7 +197,7 @@ def fundir_candidatos_rapido(candidatos: List[Dict]) -> List[Dict]:
         for f in finais:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
             r_ref = max(c["r"], f["r"])
-            if dist < 0.30 * r_ref and abs(c["r"] - f["r"]) < 0.25 * r_ref:
+            if dist < 0.32 * r_ref and abs(c["r"] - f["r"]) < 0.25 * r_ref:
                 manter = False
                 break
         if manter:
@@ -244,20 +207,17 @@ def fundir_candidatos_rapido(candidatos: List[Dict]) -> List[Dict]:
 
 
 # ============================================================
-# DETECÇÃO MAIS RÁPIDA
+# DETECÇÃO LEVE
 # ============================================================
-def detectar_bolhas_multiescala(
+def detectar_bolhas_leve(
     img_bgr: np.ndarray,
     roi_info: Dict[str, int],
     mask_roi: np.ndarray,
     px_per_mm: Optional[float],
 ):
-    proc = preprocessar_rapido(img_bgr, mask_roi)
+    base = preprocessar_leve(img_bgr, mask_roi)
 
-    base = proc["blackhat"]
-
-    # scale menor = mais rápido
-    crop, (x0, y0), scale = recortar_roi_para_deteccao(base, roi_info, scale=0.4)
+    crop, (x0, y0), scale = recortar_roi_para_deteccao(base, roi_info, scale=0.45)
 
     candidatos = []
 
@@ -265,22 +225,22 @@ def detectar_bolhas_multiescala(
         px_per_mm_small = px_per_mm * scale
         faixas = [
             {
-                "minR": max(3, int(px_per_mm_small * 0.010)),
-                "maxR": max(10, int(px_per_mm_small * 0.035)),
-                "minDist": max(5, int(px_per_mm_small * 0.012)),
-                "param2": 7,
+                "minR": max(3, int(px_per_mm_small * 0.012)),
+                "maxR": max(10, int(px_per_mm_small * 0.040)),
+                "minDist": max(5, int(px_per_mm_small * 0.015)),
+                "param2": 8,
             },
             {
-                "minR": max(10, int(px_per_mm_small * 0.030)),
-                "maxR": max(45, int(px_per_mm_small * 0.140)),
-                "minDist": max(8, int(px_per_mm_small * 0.022)),
-                "param2": 9,
+                "minR": max(10, int(px_per_mm_small * 0.035)),
+                "maxR": max(42, int(px_per_mm_small * 0.140)),
+                "minDist": max(8, int(px_per_mm_small * 0.025)),
+                "param2": 10,
             },
         ]
     else:
         faixas = [
-            {"minR": 3, "maxR": 10, "minDist": 5, "param2": 7},
-            {"minR": 10, "maxR": 45, "minDist": 8, "param2": 9},
+            {"minR": 3, "maxR": 10, "minDist": 5, "param2": 8},
+            {"minR": 10, "maxR": 42, "minDist": 8, "param2": 10},
         ]
 
     for faixa in faixas:
@@ -310,21 +270,15 @@ def detectar_bolhas_multiescala(
             if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
                 continue
 
-            score = score_circulo_rapido(base, x, y, r)
-            if score < 0.8:
-                continue
-
             candidatos.append(
                 {
                     "x": float(x),
                     "y": float(y),
                     "r": float(r),
-                    "score": 1.0,
                 }
             )
 
-    bolhas = fundir_candidatos_rapido(candidatos)
-    return bolhas
+    return fundir_candidatos(candidatos)
 
 
 # ============================================================
@@ -438,7 +392,7 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         )
 
         url = montar_url_publica(imagem_escolhida)
-        img_pil = baixar_imagem(url)
+        img_pil = abrir_imagem(url)
         img_bgr = pil_to_cv(img_pil)
 
         px_per_mm, img_barra, barra_info = detectar_barra_escala_px(img_bgr)
@@ -495,7 +449,7 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         if processar:
             with st.spinner("Detectando bolhas..."):
-                bolhas = detectar_bolhas_multiescala(
+                bolhas = detectar_bolhas_leve(
                     img_bgr=img_bgr,
                     roi_info=roi_info,
                     mask_roi=mask_roi,
