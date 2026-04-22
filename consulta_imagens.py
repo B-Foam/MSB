@@ -1,6 +1,6 @@
 import io
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import cv2
 import numpy as np
@@ -10,24 +10,7 @@ from PIL import Image
 
 
 # ============================================================
-# ESTADO
-# ============================================================
-def garantir_estado(session_state):
-    if "lista_imagens_consulta" not in session_state:
-        session_state.lista_imagens_consulta = []
-
-    if "roi_consulta" not in session_state:
-        session_state.roi_consulta = {}
-
-    if "imagem_cache" not in session_state:
-        session_state.imagem_cache = {}
-
-    if "resultado_cache" not in session_state:
-        session_state.resultado_cache = {}
-
-
-# ============================================================
-# DOWNLOAD / CONVERSÃO
+# CACHE / UTILITÁRIOS
 # ============================================================
 @st.cache_data(show_spinner=False)
 def baixar_imagem_bytes(url: str) -> bytes:
@@ -49,6 +32,13 @@ def cv_to_pil(img_cv: np.ndarray) -> Image.Image:
     if len(img_cv.shape) == 2:
         return Image.fromarray(img_cv)
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+
+def garantir_estado(session_state):
+    if "lista_imagens_consulta" not in session_state:
+        session_state.lista_imagens_consulta = []
+    if "roi_consulta" not in session_state:
+        session_state.roi_consulta = {}
 
 
 # ============================================================
@@ -79,7 +69,6 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
         x, y, ww, hh = cv2.boundingRect(cnt)
         aspect = ww / max(hh, 1)
         area = ww * hh
-
         if ww > 60 and hh < 25 and aspect > 4.5 and area > melhor_area:
             melhor_area = area
             melhor = (x, y, ww, hh)
@@ -146,13 +135,13 @@ def ponto_totalmente_dentro_roi(x: float, y: float, r: float, roi_info: Dict[str
 
 
 # ============================================================
-# DETECÇÃO LEVE
+# PRÉ-PROCESSAMENTO LEVE
 # ============================================================
 def preprocessar_leve(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray[mask_roi == 0] = 0
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
     clahe_img = clahe.apply(gray)
 
     blur = cv2.GaussianBlur(clahe_img, (5, 5), 0)
@@ -168,6 +157,9 @@ def preprocessar_leve(img_bgr: np.ndarray, mask_roi: np.ndarray):
     return blackhat
 
 
+# ============================================================
+# CROP DA ROI
+# ============================================================
 def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale: float = 0.35):
     cx, cy, r = roi_info["cx"], roi_info["cy"], roi_info["r"]
 
@@ -186,7 +178,52 @@ def recortar_roi_para_deteccao(img: np.ndarray, roi_info: Dict[str, int], scale:
     return crop_small, (x0, y0), scale
 
 
-def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
+# ============================================================
+# SCORE MAIS SELETIVO
+# ============================================================
+def score_circulo(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
+    x = int(round(x))
+    y = int(round(y))
+    r = int(round(r))
+
+    if r < 4:
+        return 0.0
+
+    h, w = ref_img.shape[:2]
+    pad = int(r * 1.5) + 3
+
+    x0 = max(0, x - pad)
+    x1 = min(w, x + pad + 1)
+    y0 = max(0, y - pad)
+    y1 = min(h, y + pad + 1)
+
+    crop = ref_img[y0:y1, x0:x1]
+    if crop.size == 0:
+        return 0.0
+
+    yy, xx = np.indices(crop.shape)
+    xx = xx + x0
+    yy = yy + y0
+    dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
+
+    centro = dist <= int(r * 0.55)
+    anel = (dist >= int(r * 0.82)) & (dist <= int(r * 1.12))
+    externo = (dist >= int(r * 1.18)) & (dist <= int(r * 1.45))
+
+    if np.count_nonzero(anel) < 10 or np.count_nonzero(centro) < 10 or np.count_nonzero(externo) < 10:
+        return 0.0
+
+    mean_anel = float(np.mean(crop[anel]))
+    mean_centro = float(np.mean(crop[centro]))
+    mean_externo = float(np.mean(crop[externo]))
+
+    return mean_anel - 0.45 * mean_centro - 0.25 * mean_externo
+
+
+# ============================================================
+# FILTROS GEOMÉTRICOS
+# ============================================================
+def remover_pequenas_dentro_de_grandes(candidatos: List[Dict]) -> List[Dict]:
     if not candidatos:
         return []
 
@@ -197,16 +234,44 @@ def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
         manter = True
         for f in finais:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
-            r_ref = max(c["r"], f["r"])
-            if dist < 0.45 * r_ref and abs(c["r"] - f["r"]) < 0.30 * r_ref:
+
+            # se uma pequena está muito dentro de uma maior, remove
+            if c["r"] < 0.55 * f["r"] and dist + c["r"] < 0.82 * f["r"]:
                 manter = False
                 break
+
         if manter:
             finais.append(c)
 
     return finais
 
 
+def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
+    if not candidatos:
+        return []
+
+    candidatos = sorted(candidatos, key=lambda c: (c["score"], c["r"]), reverse=True)
+    finais = []
+
+    for c in candidatos:
+        manter = True
+        for f in finais:
+            dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
+            r_ref = max(c["r"], f["r"])
+
+            if dist < 0.55 * r_ref and abs(c["r"] - f["r"]) < 0.35 * r_ref:
+                manter = False
+                break
+
+        if manter:
+            finais.append(c)
+
+    return finais
+
+
+# ============================================================
+# DETECÇÃO AJUSTADA
+# ============================================================
 def detectar_bolhas_leve(
     img_bgr: np.ndarray,
     roi_info: Dict[str, int],
@@ -221,31 +286,36 @@ def detectar_bolhas_leve(
 
     if px_per_mm and px_per_mm > 0:
         px_per_mm_small = px_per_mm * scale
+
         faixas = [
+            # pequenas: menos permissiva
             {
-                "minR": max(4, int(px_per_mm_small * 0.020)),
-                "maxR": max(11, int(px_per_mm_small * 0.045)),
-                "minDist": max(6, int(px_per_mm_small * 0.018)),
-                "param2": 14,
+                "nome": "pequenas",
+                "minR": max(5, int(px_per_mm_small * 0.025)),
+                "maxR": max(10, int(px_per_mm_small * 0.045)),
+                "minDist": max(8, int(px_per_mm_small * 0.022)),
+                "param2": 15,
             },
+            # médias/grandes: mais favorecida
             {
-                "minR": max(11, int(px_per_mm_small * 0.045)),
-                "maxR": max(38, int(px_per_mm_small * 0.140)),
-                "minDist": max(10, int(px_per_mm_small * 0.028)),
-                "param2": 18,
+                "nome": "medias_grandes",
+                "minR": max(10, int(px_per_mm_small * 0.045)),
+                "maxR": max(46, int(px_per_mm_small * 0.180)),
+                "minDist": max(12, int(px_per_mm_small * 0.040)),
+                "param2": 14,
             },
         ]
     else:
         faixas = [
-            {"minR": 4, "maxR": 11, "minDist": 6, "param2": 14},
-            {"minR": 11, "maxR": 38, "minDist": 10, "param2": 18},
+            {"nome": "pequenas", "minR": 5, "maxR": 10, "minDist": 8, "param2": 15},
+            {"nome": "medias_grandes", "minR": 10, "maxR": 46, "minDist": 12, "param2": 14},
         ]
 
     for faixa in faixas:
         circles = cv2.HoughCircles(
             crop,
             cv2.HOUGH_GRADIENT,
-            dp=1.25,
+            dp=1.2,
             minDist=faixa["minDist"],
             param1=90,
             param2=faixa["param2"],
@@ -268,9 +338,34 @@ def detectar_bolhas_leve(
             if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
                 continue
 
-            candidatos.append({"x": float(x), "y": float(y), "r": float(r)})
+            score = score_circulo(base, x, y, r)
 
-    return fundir_candidatos(candidatos)
+            # pequenas exigem score maior
+            if faixa["nome"] == "pequenas":
+                if score < 5.5:
+                    continue
+            else:
+                if score < 4.0:
+                    continue
+
+            candidatos.append(
+                {
+                    "x": float(x),
+                    "y": float(y),
+                    "r": float(r),
+                    "score": float(score),
+                }
+            )
+
+    bolhas = fundir_candidatos(candidatos)
+    bolhas = remover_pequenas_dentro_de_grandes(bolhas)
+
+    if len(bolhas) > 0:
+        scores = np.array([b["score"] for b in bolhas], dtype=float)
+        limiar = max(5.0, float(np.percentile(scores, 25)))
+        bolhas = [b for b in bolhas if b["score"] >= limiar]
+
+    return bolhas
 
 
 # ============================================================
@@ -383,7 +478,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             key="select_imagem_consulta",
         )
 
-        # sem baixar/processar mais nada além do essencial
         url = montar_url_publica(imagem_escolhida)
         img_pil = abrir_imagem(url)
         img_bgr = pil_to_cv(img_pil)
@@ -427,9 +521,10 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         session_state.roi_consulta[imagem_escolhida] = roi_info
 
-        img_roi = desenhar_imagem_roi(img_bgr, roi_info, barra_info=barra_info)
+        mask_roi = criar_mascara_roi(img_bgr.shape, roi_info, barra_info)
 
         st.markdown("### Imagem 1 — área útil + calibração")
+        img_roi = desenhar_imagem_roi(img_bgr, roi_info, barra_info=barra_info)
         st.image(cv_to_pil(img_roi), use_container_width=True)
 
         if px_per_mm:
@@ -439,7 +534,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         if st.button("Detectar bolhas", key=f"processar_{imagem_escolhida}"):
             with st.spinner("Detectando bolhas..."):
-                mask_roi = criar_mascara_roi(img_bgr.shape, roi_info, barra_info)
                 bolhas = detectar_bolhas_leve(
                     img_bgr=img_bgr,
                     roi_info=roi_info,
