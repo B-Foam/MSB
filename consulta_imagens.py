@@ -114,88 +114,62 @@ def aplicar_mascara_exclusao(img_gray, mask_exclusao, valor=255):
 
 
 # ============================================================
-# PIPELINE: CLAHE -> BILATERAL -> BLACK-HAT -> ADAPTIVE THRESH
+# PRÉ-PROCESSAMENTO PRINCIPAL
 # ============================================================
-def preprocessar_pipeline_blackhat(
-    img_bgr,
-    mask_exclusao,
-    clip_limit,
-    bilateral_d,
-    bilateral_sigma_color,
-    bilateral_sigma_space,
-    kernel_blackhat,
-    block_size,
-    c_value,
-    usar_reforco
-):
+def gerar_imagens_base(img_bgr, mask_exclusao, clip_limit, bilateral_d, sigma_color, sigma_space):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray = aplicar_mascara_exclusao(gray, mask_exclusao, valor=255)
 
-    # 1) CLAHE
-    clahe = cv2.createCLAHE(
-        clipLimit=clip_limit,
-        tileGridSize=(8, 8)
-    )
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
     clahe_img = clahe.apply(gray)
 
-    # 2) Bilateral
     bilateral = cv2.bilateralFilter(
         clahe_img,
         d=bilateral_d,
-        sigmaColor=bilateral_sigma_color,
-        sigmaSpace=bilateral_sigma_space
+        sigmaColor=sigma_color,
+        sigmaSpace=sigma_space
     )
 
-    # 3) Black-Hat
-    kernel_bh = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (kernel_blackhat, kernel_blackhat)
-    )
-    blackhat = cv2.morphologyEx(bilateral, cv2.MORPH_BLACKHAT, kernel_bh)
-    blackhat_norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+    return gray, clahe_img, bilateral
 
-    # 4) Reforço opcional
-    if usar_reforco:
-        imagem_para_limiar = cv2.addWeighted(bilateral, 1.0, blackhat_norm, 2.0, 0)
-        imagem_para_limiar = cv2.normalize(imagem_para_limiar, None, 0, 255, cv2.NORM_MINMAX)
-    else:
-        imagem_para_limiar = blackhat_norm
 
-    # blockSize precisa ser ímpar
+def gerar_gradiente_morfologico(img_gray, kernel_size):
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    grad = cv2.morphologyEx(img_gray, cv2.MORPH_GRADIENT, kernel)
+    grad = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX)
+    return grad
+
+
+def gerar_dog_suave(img_gray, sigma1, sigma2):
+    g1 = cv2.GaussianBlur(img_gray, (0, 0), sigma1)
+    g2 = cv2.GaussianBlur(img_gray, (0, 0), sigma2)
+    dog = cv2.subtract(g2, g1)
+    dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX)
+    return dog
+
+
+def binarizar_adaptativo(img_gray, block_size, c_value, mask_exclusao):
     if block_size % 2 == 0:
         block_size += 1
 
-    # 5) Threshold adaptativo
     th = cv2.adaptiveThreshold(
-        imagem_para_limiar,
+        img_gray,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
+        cv2.THRESH_BINARY_INV,
         block_size,
         c_value
     )
 
-    # inverter para deixar o contorno candidato em branco
-    th_inv = cv2.bitwise_not(th)
+    th[mask_exclusao == 255] = 0
 
-    # remover regiões excluídas
-    th_inv[mask_exclusao == 255] = 0
-
-    # 6) Limpeza leve
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(th_inv, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    return {
-        "gray": gray,
-        "clahe": clahe_img,
-        "bilateral": bilateral,
-        "blackhat": blackhat,
-        "blackhat_norm": blackhat_norm,
-        "realcado": imagem_para_limiar,
-        "threshold": th,
-        "mask": mask
-    }
+    return th
 
 
 # ============================================================
@@ -231,12 +205,12 @@ def extrair_contornos_candidatos(mask, area_min, area_max, circularidade_min):
     return candidatos
 
 
-def desenhar_contornos(img_bgr, candidatos):
+def desenhar_contornos(img_bgr, candidatos, cor=(0, 255, 0)):
     out = img_bgr.copy()
 
     for c in candidatos:
         cnt = c["contorno"]
-        cv2.drawContours(out, [cnt], -1, (0, 255, 0), 1)
+        cv2.drawContours(out, [cnt], -1, cor, 1)
 
     cv2.putText(
         out,
@@ -244,7 +218,7 @@ def desenhar_contornos(img_bgr, candidatos):
         (20, 40),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.9,
-        (0, 255, 0),
+        cor,
         2,
         cv2.LINE_AA
     )
@@ -252,18 +226,24 @@ def desenhar_contornos(img_bgr, candidatos):
     return out
 
 
-def montar_resumo_contornos(candidatos):
+def montar_resumo(nome, candidatos):
     if not candidatos:
-        return pd.DataFrame(columns=["Contornos", "Area media", "Circularidade media"])
+        return {
+            "Filtro": nome,
+            "Contornos": 0,
+            "Area media": 0.0,
+            "Circularidade media": 0.0,
+        }
 
     areas = [c["area"] for c in candidatos]
-    circ = [c["circularidade"] for c in candidatos]
+    circs = [c["circularidade"] for c in candidatos]
 
-    return pd.DataFrame([{
+    return {
+        "Filtro": nome,
         "Contornos": len(candidatos),
         "Area media": round(float(np.mean(areas)), 2),
-        "Circularidade media": round(float(np.mean(circ)), 4)
-    }])
+        "Circularidade media": round(float(np.mean(circs)), 4),
+    }
 
 
 # ============================================================
@@ -300,35 +280,30 @@ def render_consulta_imagens(
 
         url_imagem = montar_url_publica(escolhido)
 
-        st.markdown("## Configurações do pipeline")
+        st.markdown("## Configurações do pré-processamento")
 
         col1, col2, col3 = st.columns(3)
         with col1:
             clip_limit = st.slider("CLAHE - contraste local", 1.0, 5.0, 2.0, 0.1)
             bilateral_d = st.slider("Bilateral - diâmetro", 3, 15, 9, 2)
-            bilateral_sigma_color = st.slider("Bilateral - sigma cor", 10, 150, 75, 5)
-
         with col2:
-            bilateral_sigma_space = st.slider("Bilateral - sigma espaço", 10, 150, 75, 5)
-            kernel_blackhat = st.slider("Black-Hat - kernel", 5, 41, 15, 2)
-            if kernel_blackhat % 2 == 0:
-                kernel_blackhat += 1
-            usar_reforco = st.checkbox("Usar reforço do Black-Hat", value=True)
-
+            sigma_color = st.slider("Bilateral - sigma cor", 10, 150, 75, 5)
+            sigma_space = st.slider("Bilateral - sigma espaço", 10, 150, 75, 5)
         with col3:
-            block_size = st.slider("Threshold - bloco local", 11, 151, 51, 2)
-            if block_size % 2 == 0:
-                block_size += 1
-            c_value = st.slider("Threshold - ajuste fino (C)", 0, 15, 3, 1)
+            kernel_grad = st.slider("Gradiente morfológico - kernel", 3, 21, 5, 2)
+            block_size = st.slider("Threshold adaptativo - bloco", 11, 151, 51, 2)
 
-        st.markdown("## Configurações dos contornos")
+        st.markdown("## Configurações do DoG e contornos")
 
         col4, col5, col6 = st.columns(3)
         with col4:
-            area_min = st.slider("Área mínima do contorno (px²)", 5, 5000, 40, 5)
+            sigma1 = st.slider("DoG - sigma 1", 0.5, 5.0, 1.0, 0.1)
+            sigma2 = st.slider("DoG - sigma 2", 1.0, 8.0, 2.0, 0.1)
         with col5:
-            area_max = st.slider("Área máxima do contorno (px²)", 100, 50000, 5000, 50)
+            c_value = st.slider("Threshold adaptativo - C", 0, 15, 3, 1)
+            area_min = st.slider("Área mínima do contorno (px²)", 5, 5000, 40, 5)
         with col6:
+            area_max = st.slider("Área máxima do contorno (px²)", 100, 50000, 5000, 50)
             circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.20, 0.01)
 
         try:
@@ -350,23 +325,46 @@ def render_consulta_imagens(
                 use_container_width=True
             )
 
-            # preprocessamento
+            # máscara fixa
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
 
-            resultado = preprocessar_pipeline_blackhat(
-                img_bgr=img_original_bgr,
-                mask_exclusao=mask_exclusao,
-                clip_limit=clip_limit,
-                bilateral_d=bilateral_d,
-                bilateral_sigma_color=bilateral_sigma_color,
-                bilateral_sigma_space=bilateral_sigma_space,
-                kernel_blackhat=kernel_blackhat,
-                block_size=block_size,
-                c_value=c_value,
-                usar_reforco=usar_reforco
+            # imagens base
+            gray, clahe_img, bilateral = gerar_imagens_base(
+                img_original_bgr,
+                mask_exclusao,
+                clip_limit,
+                bilateral_d,
+                sigma_color,
+                sigma_space
             )
 
-            st.markdown("## Diagnóstico do pré-processamento")
+            # filtros principais
+            grad = gerar_gradiente_morfologico(bilateral, kernel_grad)
+            dog = gerar_dog_suave(bilateral, sigma1, sigma2)
+
+            # máscaras binárias
+            mask_grad = binarizar_adaptativo(grad, block_size, c_value, mask_exclusao)
+            mask_dog = binarizar_adaptativo(dog, block_size, c_value, mask_exclusao)
+
+            # contornos
+            cont_grad = extrair_contornos_candidatos(
+                mask_grad,
+                area_min=area_min,
+                area_max=area_max,
+                circularidade_min=circularidade_min
+            )
+
+            cont_dog = extrair_contornos_candidatos(
+                mask_dog,
+                area_min=area_min,
+                area_max=area_max,
+                circularidade_min=circularidade_min
+            )
+
+            img_cont_grad = desenhar_contornos(img_original_bgr, cont_grad, cor=(0, 255, 0))
+            img_cont_dog = desenhar_contornos(img_original_bgr, cont_dog, cor=(255, 0, 0))
+
+            st.markdown("## Tratamento inicial")
 
             p1, p2, p3 = st.columns(3)
             with p1:
@@ -374,57 +372,51 @@ def render_consulta_imagens(
                 st.image(img_original_pil, use_container_width=True)
             with p2:
                 st.caption("CLAHE")
-                st.image(resultado["clahe"], use_container_width=True)
+                st.image(clahe_img, use_container_width=True)
             with p3:
                 st.caption("Filtro bilateral")
-                st.image(resultado["bilateral"], use_container_width=True)
+                st.image(bilateral, use_container_width=True)
 
-            p4, p5, p6 = st.columns(3)
+            p4, p5 = st.columns(2)
             with p4:
-                st.caption("Black-Hat")
-                st.image(resultado["blackhat"], use_container_width=True)
+                st.caption("Gradiente morfológico")
+                st.image(grad, use_container_width=True)
             with p5:
-                st.caption("Black-Hat normalizado")
-                st.image(resultado["blackhat_norm"], use_container_width=True)
-            with p6:
-                st.caption("Imagem reforçada")
-                st.image(resultado["realcado"], use_container_width=True)
+                st.caption("DoG suave")
+                st.image(dog, use_container_width=True)
 
-            p7, p8 = st.columns(2)
-            with p7:
-                st.caption("Threshold adaptativo")
-                st.image(resultado["threshold"], use_container_width=True)
-            with p8:
-                st.caption("Máscara final")
-                st.image(resultado["mask"], use_container_width=True)
+            st.markdown("## Máscaras candidatas")
 
-            # contornos
-            candidatos = extrair_contornos_candidatos(
-                resultado["mask"],
-                area_min=area_min,
-                area_max=area_max,
-                circularidade_min=circularidade_min
-            )
+            m1, m2 = st.columns(2)
+            with m1:
+                st.caption(f"Máscara do gradiente — {len(cont_grad)} contornos")
+                st.image(mask_grad, use_container_width=True)
+            with m2:
+                st.caption(f"Máscara do DoG — {len(cont_dog)} contornos")
+                st.image(mask_dog, use_container_width=True)
 
-            img_contornos = desenhar_contornos(img_original_bgr, candidatos)
-
-            st.markdown("## Diagnóstico dos contornos")
+            st.markdown("## Contornos sobre a imagem original")
 
             cta, ctb = st.columns(2)
             with cta:
-                st.caption(f"Máscara final — {len(candidatos)} contornos")
-                st.image(resultado["mask"], use_container_width=True)
+                st.caption("Contornos do gradiente")
+                st.image(cv_to_pil(img_cont_grad), use_container_width=True)
             with ctb:
-                st.caption("Contornos sobre a imagem original")
-                st.image(cv_to_pil(img_contornos), use_container_width=True)
+                st.caption("Contornos do DoG")
+                st.image(cv_to_pil(img_cont_dog), use_container_width=True)
+
+            resumo = pd.DataFrame([
+                montar_resumo("Gradiente morfológico", cont_grad),
+                montar_resumo("DoG suave", cont_dog),
+            ])
 
             st.markdown("## Resumo")
-            st.dataframe(montar_resumo_contornos(candidatos), use_container_width=True)
+            st.dataframe(resumo, use_container_width=True)
 
             st.info(
-                "Esta etapa serve para validar visualmente se o pipeline "
-                "CLAHE → Bilateral → Black-Hat → Adaptive Threshold está "
-                "gerando contornos candidatos próximos das bordas reais das bolhas."
+                "Objetivo desta etapa: descobrir se o gradiente morfológico "
+                "ou o DoG suave gera contornos mais próximos das bordas reais "
+                "das bolhas, antes de voltar para a medição."
             )
 
         except Exception as e:
