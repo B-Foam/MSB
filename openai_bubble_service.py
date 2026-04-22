@@ -1,6 +1,6 @@
 import base64
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
@@ -38,40 +38,12 @@ def build_bubble_schema() -> Dict[str, Any]:
     }
 
 
-def analyze_bubbles_with_openai(
-    api_key: str,
-    image_bytes: bytes,
-    mime_type: str = "image/png",
-    model: str = "gpt-5.4",
+def _create_response(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    data_url: str,
 ) -> Dict[str, Any]:
-    """
-    Envia uma imagem para a OpenAI Responses API e pede JSON estruturado
-    com centros e raios das bolhas.
-    """
-    client = OpenAI(api_key=api_key)
-    data_url = image_url_to_data_url(image_bytes, mime_type=mime_type)
-
-    prompt = """
-Você está analisando uma imagem microscópica de microbolhas/espuma.
-
-Tarefa:
-1. Considere apenas a área principal útil da imagem.
-2. Ignore texto superior, bordas irrelevantes e a barra de escala como bolha.
-3. Identifique bolhas visíveis e retorne:
-   - x: coordenada horizontal do centro em pixels
-   - y: coordenada vertical do centro em pixels
-   - radius_px: raio aproximado em pixels
-   - confidence: confiança entre 0 e 1
-4. Se conseguir identificar a barra de 1.0 mm, retorne o comprimento em pixels em scale_bar_px.
-5. Retorne SOMENTE o JSON solicitado.
-
-Regras:
-- Prefira círculos que correspondam ao contorno visual dominante de cada bolha.
-- Não invente bolhas fora da área útil.
-- Não inclua a barra de escala nem o cabeçalho superior.
-- confidence deve ser mais alta para bolhas visualmente claras.
-"""
-
     response = client.responses.create(
         model=model,
         input=[
@@ -97,18 +69,94 @@ Regras:
     if not raw_text:
         raise ValueError("A resposta da API veio sem output_text.")
 
-    data = json.loads(raw_text)
+    return json.loads(raw_text)
 
-    if "bubbles" not in data:
-        raise ValueError("JSON retornado sem a chave 'bubbles'.")
 
-    return data
+def analyze_bubbles_with_openai(
+    api_key: str,
+    image_bytes: bytes,
+    mime_type: str = "image/png",
+    model: str = "gpt-5.4",
+) -> Dict[str, Any]:
+    client = OpenAI(api_key=api_key)
+    data_url = image_url_to_data_url(image_bytes, mime_type=mime_type)
+
+    prompt = """
+Você está analisando uma imagem microscópica de microbolhas/espuma.
+
+Tarefa:
+1. Considere somente a área principal útil da imagem.
+2. Ignore cabeçalho superior, texto, barra de escala e bordas irrelevantes.
+3. Detecte o MAIOR NÚMERO POSSÍVEL de bolhas visíveis, incluindo pequenas, médias e grandes.
+4. Para cada bolha, retorne:
+   - x: centro horizontal em pixels
+   - y: centro vertical em pixels
+   - radius_px: raio aproximado em pixels
+   - confidence: confiança entre 0 e 1
+5. Se conseguir identificar a barra de 1.0 mm, retorne o comprimento em pixels em scale_bar_px.
+6. Retorne SOMENTE o JSON solicitado.
+
+Regras:
+- Prefira o contorno dominante visível da bolha.
+- Não invente bolhas fora da área útil.
+- Não inclua a barra de escala nem o cabeçalho.
+- Inclua bolhas pequenas quando visíveis.
+- Se houver dúvida, use confidence menor, mas ainda inclua a bolha.
+"""
+
+    return _create_response(client, model, prompt, data_url)
+
+
+def revise_bubbles_with_feedback(
+    api_key: str,
+    image_bytes: bytes,
+    previous_result: Dict[str, Any],
+    feedback: Dict[str, Any],
+    mime_type: str = "image/png",
+    model: str = "gpt-5.4",
+) -> Dict[str, Any]:
+    client = OpenAI(api_key=api_key)
+    data_url = image_url_to_data_url(image_bytes, mime_type=mime_type)
+
+    previous_json = json.dumps(previous_result, ensure_ascii=False)
+    feedback_json = json.dumps(feedback, ensure_ascii=False)
+
+    prompt = f"""
+Você está revisando uma detecção anterior de bolhas em uma imagem microscópica.
+
+Resultado anterior:
+{previous_json}
+
+Feedback do usuário:
+{feedback_json}
+
+Tarefa:
+- Revise o resultado anterior com base no feedback.
+- Use a imagem original como fonte principal.
+- Retorne um NOVO JSON completo no mesmo formato.
+- Ajuste a quantidade de bolhas, posição e raio conforme o feedback.
+
+Significado dos campos de feedback:
+- poucas_bolhas: a detecção deixou bolhas reais de fora
+- excesso_bolhas: a detecção criou bolhas demais / falsos positivos
+- contornos_nao_ajustados: os círculos não coincidem bem com o contorno dominante
+- bolhas_grandes_perdidas: bolhas maiores relevantes não foram incluídas
+- bolhas_pequenas_perdidas: bolhas pequenas visíveis não foram incluídas
+
+Regras:
+- Não inclua cabeçalho, barra de escala ou artefatos.
+- Prefira detectar a área útil principal.
+- Corrija o resultado anterior, não repita cegamente.
+- Retorne SOMENTE o JSON solicitado.
+"""
+
+    return _create_response(client, model, prompt, data_url)
 
 
 def filter_bubbles(
     bubbles: List[Dict[str, Any]],
-    min_radius_px: float = 3.0,
-    min_confidence: float = 0.35,
+    min_radius_px: float = 2.0,
+    min_confidence: float = 0.10,
 ) -> List[Dict[str, Any]]:
     filtered = []
     for b in bubbles:
