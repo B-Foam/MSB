@@ -28,15 +28,9 @@ def cv_to_pil(img_cv):
 
 
 # ============================================================
-# CALIBRAÇÃO PELA BARRA DE 1,0 mm
+# CALIBRAÇÃO DA BARRA DE 1,0 mm
 # ============================================================
 def detectar_barra_escala_px(img_bgr):
-    """
-    Procura a barra preta horizontal no canto inferior esquerdo.
-    Retorna:
-        - comprimento em pixels
-        - imagem anotada com a barra desenhada em verde
-    """
     img_annot = img_bgr.copy()
     h, w = img_bgr.shape[:2]
 
@@ -72,7 +66,6 @@ def detectar_barra_escala_px(img_bgr):
         return None, img_annot
 
     x, y, ww, hh = melhor
-
     gx = x0 + x
     gy = y0 + y
 
@@ -102,170 +95,99 @@ def detectar_barra_escala_px(img_bgr):
 # ============================================================
 # MÁSCARAS FIXAS
 # ============================================================
-def mascarar_regioes_fixas(img_gray):
+def criar_mascara_regioes_excluidas(shape):
+    h, w = shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    # faixa superior com texto
+    mask[0:int(h * 0.05), :] = 255
+
+    # barra de escala e canto inferior esquerdo
+    mask[int(h * 0.78):h, 0:int(w * 0.22)] = 255
+
+    return mask
+
+
+def aplicar_mascara_exclusao(img_gray, mask_exclusao):
     out = img_gray.copy()
-    h, w = out.shape[:2]
-
-    # Texto do topo
-    out[0:int(h * 0.05), :] = 255
-
-    # Região da barra de escala
-    out[int(h * 0.78):h, 0:int(w * 0.22)] = 255
-
+    out[mask_exclusao == 255] = 255
     return out
 
 
 # ============================================================
-# FILTROS DE PRÉ-PROCESSAMENTO
+# PRÉ-PROCESSAMENTO
 # ============================================================
-def filtro_clahe(img_bgr):
+def preprocessar_imagem(img_bgr, mask_exclusao):
+    """
+    Pipeline principal de pré-processamento:
+    1) escala de cinza
+    2) filtro mediano
+    3) black-hat para corrigir fundo
+    4) threshold adaptativo
+    5) fechamento morfológico
+    """
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-    return clahe.apply(gray)
 
+    # máscara fixa
+    gray_mask = aplicar_mascara_exclusao(gray, mask_exclusao)
 
-def filtro_correcao_fundo(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    background = cv2.GaussianBlur(gray, (0, 0), 35)
-    corr = cv2.addWeighted(gray, 1.8, background, -0.8, 0)
-    corr = cv2.normalize(corr, None, 0, 255, cv2.NORM_MINMAX)
-    return corr
+    # suavização robusta contra ruído/reflexos finos
+    med = cv2.medianBlur(gray_mask, 5)
 
+    # black-hat: destaca regiões escuras/contornos sobre fundo claro
+    kernel_bh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
+    blackhat = cv2.morphologyEx(med, cv2.MORPH_BLACKHAT, kernel_bh)
 
-def filtro_dog(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    g1 = cv2.GaussianBlur(gray, (0, 0), 1.0)
-    g2 = cv2.GaussianBlur(gray, (0, 0), 2.2)
-    dog = cv2.subtract(g2, g1)
-    dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX)
+    # normalização
+    blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    dog = clahe.apply(dog)
-    return dog
-
-
-def filtro_canny(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blur, 15, 60)
-    return edges
-
-
-def filtro_adaptativo(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-
+    # threshold adaptativo
     th = cv2.adaptiveThreshold(
-        blur,
+        blackhat,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
+        cv2.THRESH_BINARY,
         41,
-        2
+        -2
     )
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
-    return th
+    # inverter para trabalhar com objetos brancos
+    th_inv = cv2.bitwise_not(th)
 
+    # remover regiões excluídas
+    th_inv[mask_exclusao == 255] = 0
 
-def filtro_gradiente(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    grad_x = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
-    grad = cv2.magnitude(grad_x, grad_y)
-    grad = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return grad
+    # fechamento para fechar pequenas falhas
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    closed = cv2.morphologyEx(th_inv, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
+    # abertura leve para limpar ruído
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
-# ============================================================
-# DETECÇÃO POR HOUGH
-# ============================================================
-def detectar_bolhas_hough(
-    img_gray,
-    sensibilidade_busca,
-    distancia_minima,
-    forca_borda,
-    rigor_confirmacao,
-    raio_minimo,
-    raio_maximo
-):
-    circles = cv2.HoughCircles(
-        img_gray,
-        cv2.HOUGH_GRADIENT,
-        dp=sensibilidade_busca,
-        minDist=distancia_minima,
-        param1=forca_borda,
-        param2=rigor_confirmacao,
-        minRadius=raio_minimo,
-        maxRadius=raio_maximo
-    )
-
-    if circles is None:
-        return []
-
-    circles = np.round(circles[0, :]).astype(int)
-    return circles.tolist()
+    return gray, med, blackhat, th_inv, opened
 
 
 # ============================================================
-# DETECÇÃO POR CONTORNO
+# WATERSHED
 # ============================================================
-def detectar_bolhas_contorno(bin_img, raio_minimo, raio_maximo):
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    circulos = []
-
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < 40:
-            continue
-
-        peri = cv2.arcLength(cnt, True)
-        if peri == 0:
-            continue
-
-        circularidade = 4 * np.pi * area / (peri * peri)
-        (x, y), r = cv2.minEnclosingCircle(cnt)
-
-        if r < raio_minimo or r > raio_maximo:
-            continue
-
-        if circularidade >= 0.35:
-            circulos.append([int(x), int(y), int(r)])
-
-    return circulos
-
-
-# ============================================================
-# DETECÇÃO POR WATERSHED
-# ============================================================
-def detectar_bolhas_watershed(img_gray, raio_minimo, raio_maximo):
+def segmentar_por_watershed(bin_img):
     """
-    Usa threshold + distance transform + watershed para separar
-    regiões coladas e gerar candidatos circulares.
+    Recebe máscara binária com objetos brancos.
+    Retorna:
+    - markers
+    - mapa de distância normalizado
+    - sure_fg
+    - sure_bg
     """
-    # threshold
-    _, th = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # inverter se necessário, queremos regiões candidatas claras
-    media_obj = float(np.mean(img_gray[th == 255])) if np.any(th == 255) else 0
-    media_bg = float(np.mean(img_gray[th == 0])) if np.any(th == 0) else 0
-    if media_obj < media_bg:
-        th = cv2.bitwise_not(th)
-
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    opening = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    sure_bg = cv2.dilate(opening, kernel, iterations=2)
+    sure_bg = cv2.dilate(bin_img, kernel, iterations=2)
 
-    dist = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
-    if np.max(dist) <= 0:
-        return []
+    dist = cv2.distanceTransform(bin_img, cv2.DIST_L2, 5)
+    dist_norm = cv2.normalize(dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    _, sure_fg = cv2.threshold(dist, 0.30 * dist.max(), 255, 0)
+    _, sure_fg = cv2.threshold(dist, 0.28 * dist.max(), 255, 0)
     sure_fg = np.uint8(sure_fg)
 
     unknown = cv2.subtract(sure_bg, sure_fg)
@@ -274,10 +196,18 @@ def detectar_bolhas_watershed(img_gray, raio_minimo, raio_maximo):
     markers = markers + 1
     markers[unknown == 255] = 0
 
-    img_color = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
+    # watershed precisa de imagem 3 canais
+    img_color = cv2.cvtColor(bin_img, cv2.COLOR_GRAY2BGR)
     markers = cv2.watershed(img_color, markers)
 
-    circulos = []
+    return markers, dist_norm, sure_fg, sure_bg
+
+
+# ============================================================
+# EXTRAÇÃO E FILTRO DOS COMPONENTES
+# ============================================================
+def extrair_bolhas_dos_markers(markers, raio_min_px, raio_max_px):
+    bolhas = []
 
     for marker_id in np.unique(markers):
         if marker_id <= 1:
@@ -288,138 +218,115 @@ def detectar_bolhas_watershed(img_gray, raio_minimo, raio_maximo):
 
         for cnt in cnts:
             area = cv2.contourArea(cnt)
-            if area < 30:
+            if area < 20:
                 continue
 
             peri = cv2.arcLength(cnt, True)
             if peri == 0:
                 continue
 
-            circularidade = 4 * np.pi * area / (peri * peri)
-            (x, y), r = cv2.minEnclosingCircle(cnt)
+            hull = cv2.convexHull(cnt)
+            area_hull = cv2.contourArea(hull)
 
-            if r < raio_minimo or r > raio_maximo:
+            if area_hull <= 0:
                 continue
 
-            if circularidade >= 0.25:
-                circulos.append([int(x), int(y), int(r)])
+            circularidade = 4 * np.pi * area / (peri * peri)
+            solidez = area / area_hull
 
-    return circulos
+            (x, y), r = cv2.minEnclosingCircle(cnt)
+
+            if r < raio_min_px or r > raio_max_px:
+                continue
+
+            bolhas.append({
+                "x": int(x),
+                "y": int(y),
+                "r": float(r),
+                "area_px": float(area),
+                "circularidade": float(circularidade),
+                "solidez": float(solidez),
+                "contorno": cnt
+            })
+
+    return bolhas
 
 
-# ============================================================
-# LIMPEZA DE DETECÇÕES
-# ============================================================
-def remover_circulos_duplicados(circulos, fator=0.72):
-    if not circulos:
-        return []
-
-    circulos = sorted(circulos, key=lambda c: c[2], reverse=True)
+def filtrar_bolhas_segmentadas(
+    bolhas,
+    circularidade_min,
+    solidez_min,
+    area_min_px,
+    area_max_px
+):
     finais = []
 
-    for x, y, r in circulos:
+    for b in bolhas:
+        if b["area_px"] < area_min_px:
+            continue
+        if b["area_px"] > area_max_px:
+            continue
+        if b["circularidade"] < circularidade_min:
+            continue
+        if b["solidez"] < solidez_min:
+            continue
+        finais.append(b)
+
+    return finais
+
+
+def remover_bolhas_muito_proximas(bolhas, fator=0.55):
+    if not bolhas:
+        return []
+
+    bolhas = sorted(bolhas, key=lambda b: b["r"], reverse=True)
+    finais = []
+
+    for b in bolhas:
         manter = True
 
-        for xf, yf, rf in finais:
-            dist = ((x - xf) ** 2 + (y - yf) ** 2) ** 0.5
-
-            if dist < fator * min(r, rf):
-                manter = False
-                break
-
-            if dist < 6 and abs(r - rf) < 8:
+        for f in finais:
+            dist = ((b["x"] - f["x"]) ** 2 + (b["y"] - f["y"]) ** 2) ** 0.5
+            if dist < fator * min(b["r"], f["r"]):
                 manter = False
                 break
 
         if manter:
-            finais.append([x, y, r])
+            finais.append(b)
 
     return finais
 
 
-def filtrar_circulos_borda(circulos, shape):
+def filtrar_borda_bolhas(bolhas, shape):
     h, w = shape[:2]
     finais = []
 
-    for x, y, r in circulos:
+    for b in bolhas:
+        x, y, r = b["x"], b["y"], b["r"]
+
         if x - r <= 4 or y - r <= 4 or x + r >= w - 4 or y + r >= h - 4:
             continue
-        finais.append([x, y, r])
 
-    return finais
-
-
-def remover_circulos_muito_grandes(circulos, img_shape):
-    h, w = img_shape[:2]
-    limite = min(h, w) * 0.12
-
-    finais = []
-    for x, y, r in circulos:
-        if r <= limite:
-            finais.append([x, y, r])
-
-    return finais
-
-
-def filtrar_por_assinatura_radial(img_gray, circulos):
-    """
-    Mantém círculos cuja borda se comporta como bolha real.
-    """
-    h, w = img_gray.shape[:2]
-    finais = []
-
-    for x, y, r in circulos:
-        if r < 5:
-            continue
-
-        mask_centro = np.zeros((h, w), dtype=np.uint8)
-        mask_anel = np.zeros((h, w), dtype=np.uint8)
-        mask_externo = np.zeros((h, w), dtype=np.uint8)
-
-        r_centro = max(2, int(r * 0.42))
-        r_anel_in = max(r_centro + 1, int(r * 0.72))
-        r_anel_out = int(r * 1.00)
-        r_ext_in = int(r * 1.05)
-        r_ext_out = int(r * 1.22)
-
-        cv2.circle(mask_centro, (x, y), r_centro, 255, -1)
-
-        cv2.circle(mask_anel, (x, y), r_anel_out, 255, -1)
-        cv2.circle(mask_anel, (x, y), r_anel_in, 0, -1)
-
-        cv2.circle(mask_externo, (x, y), r_ext_out, 255, -1)
-        cv2.circle(mask_externo, (x, y), r_ext_in, 0, -1)
-
-        vals_centro = img_gray[mask_centro == 255]
-        vals_anel = img_gray[mask_anel == 255]
-        vals_externo = img_gray[mask_externo == 255]
-
-        if len(vals_centro) < 10 or len(vals_anel) < 10 or len(vals_externo) < 10:
-            continue
-
-        media_centro = float(np.mean(vals_centro))
-        media_anel = float(np.mean(vals_anel))
-        media_externo = float(np.mean(vals_externo))
-
-        contraste_anel_centro = abs(media_anel - media_centro)
-        contraste_anel_externo = abs(media_anel - media_externo)
-
-        if contraste_anel_centro >= 4 and contraste_anel_externo >= 3:
-            finais.append([x, y, r])
+        finais.append(b)
 
     return finais
 
 
 # ============================================================
-# ANOTAÇÃO / TABELAS / GRÁFICOS
+# VISUALIZAÇÕES
 # ============================================================
-def desenhar_bolhas(img_bgr, circulos, px_per_mm):
+def desenhar_bolhas(img_bgr, bolhas, px_per_mm):
     out = img_bgr.copy()
 
-    for x, y, r in circulos:
+    for b in bolhas:
+        x, y, r = int(b["x"]), int(b["y"]), int(b["r"])
         diam_um = (2 * r / px_per_mm) * 1000.0
 
-        cv2.circle(out, (x, y), r, (0, 255, 0), 2)
+        cor = (0, 255, 0)
+        if diam_um > 500:
+            cor = (255, 0, 0)
+
+        cv2.circle(out, (x, y), r, cor, 2)
 
         if diam_um >= 300:
             cv2.putText(
@@ -435,7 +342,7 @@ def desenhar_bolhas(img_bgr, circulos, px_per_mm):
 
     cv2.putText(
         out,
-        f"Bolhas detectadas: {len(circulos)}",
+        f"Bolhas detectadas: {len(bolhas)}",
         (20, 40),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.9,
@@ -447,20 +354,49 @@ def desenhar_bolhas(img_bgr, circulos, px_per_mm):
     return out
 
 
-def montar_dataframe_medidas(circulos, px_per_mm):
+def desenhar_segmentacao(markers):
+    """
+    Cria uma imagem colorida dos labels do watershed.
+    """
+    labels = markers.copy()
+    labels[labels < 0] = 0
+
+    max_label = np.max(labels)
+    if max_label <= 0:
+        return np.zeros((labels.shape[0], labels.shape[1], 3), dtype=np.uint8)
+
+    norm = (labels.astype(np.float32) / max_label * 255).astype(np.uint8)
+    color = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+
+    # bordas do watershed em branco
+    color[markers == -1] = [255, 255, 255]
+    return color
+
+
+# ============================================================
+# DATAFRAME E GRÁFICOS
+# ============================================================
+def montar_dataframe_medidas(bolhas, px_per_mm):
     dados = []
 
-    for i, (x, y, r) in enumerate(circulos, start=1):
-        diam_um = (2 * r / px_per_mm) * 1000.0
-        raio_um = (r / px_per_mm) * 1000.0
+    for i, b in enumerate(bolhas, start=1):
+        raio_px = b["r"]
+        diam_um = (2 * raio_px / px_per_mm) * 1000.0
+        raio_um = (raio_px / px_per_mm) * 1000.0
+
+        area_um2 = (b["area_px"] / (px_per_mm ** 2)) * 1_000_000
 
         dados.append({
             "Bolha": i,
-            "Centro X (px)": x,
-            "Centro Y (px)": y,
-            "Raio (px)": r,
+            "Centro X (px)": b["x"],
+            "Centro Y (px)": b["y"],
+            "Raio (px)": round(raio_px, 2),
             "Raio (µm)": round(raio_um, 2),
-            "Diâmetro (µm)": round(diam_um, 2)
+            "Diâmetro (µm)": round(diam_um, 2),
+            "Área (px²)": round(b["area_px"], 2),
+            "Área (µm²)": round(area_um2, 2),
+            "Circularidade": round(b["circularidade"], 4),
+            "Solidez": round(b["solidez"], 4)
         })
 
     return pd.DataFrame(dados)
@@ -528,34 +464,11 @@ def render_consulta_imagens(
 
         url_imagem = montar_url_publica(escolhido)
 
-        st.markdown("## Configurações da detecção")
+        st.markdown("## Configurações da segmentação")
 
-        colp1, colp2, colp3 = st.columns(3)
-        with colp1:
-            sensibilidade_busca = st.slider(
-                "Sensibilidade da busca de círculos",
-                1.0, 2.5, 1.2, 0.1,
-                help="Valores menores deixam a busca mais detalhada. Valores maiores simplificam a busca."
-            )
-            distancia_minima = st.slider(
-                "Distância mínima entre centros",
-                8, 120, 16, 1,
-                help="Aumente se estiver marcando duas bolhas quase no mesmo lugar."
-            )
+        col1, col2, col3 = st.columns(3)
 
-        with colp2:
-            forca_borda = st.slider(
-                "Força mínima da borda",
-                20, 200, 55, 1,
-                help="Aumente se estiver detectando muito ruído. Diminua se estiver perdendo bolhas."
-            )
-            rigor_confirmacao = st.slider(
-                "Rigor para confirmar a bolha",
-                8, 100, 16, 1,
-                help="Aumente para ficar mais rígido e reduzir falsos positivos. Diminua para detectar mais bolhas."
-            )
-
-        with colp3:
+        with col1:
             raio_minimo = st.slider(
                 "Raio mínimo da bolha (px)",
                 4, 80, 6, 1,
@@ -563,8 +476,32 @@ def render_consulta_imagens(
             )
             raio_maximo = st.slider(
                 "Raio máximo da bolha (px)",
-                20, 300, 85, 1,
-                help="Evita círculos muito grandes e imprecisos."
+                20, 300, 90, 1,
+                help="Evita regiões muito grandes e imprecisas."
+            )
+
+        with col2:
+            circularidade_min = st.slider(
+                "Circularidade mínima",
+                0.10, 1.00, 0.35, 0.01,
+                help="Quanto mais alto, mais circular a bolha precisa ser."
+            )
+            solidez_min = st.slider(
+                "Solidez mínima",
+                0.10, 1.00, 0.70, 0.01,
+                help="Ajuda a eliminar regiões irregulares ou junções mal separadas."
+            )
+
+        with col3:
+            area_min_px = st.slider(
+                "Área mínima da bolha (px²)",
+                10, 5000, 80, 10,
+                help="Remove regiões muito pequenas."
+            )
+            area_max_px = st.slider(
+                "Área máxima da bolha (px²)",
+                100, 100000, 12000, 100,
+                help="Remove regiões grandes demais."
             )
 
         try:
@@ -602,118 +539,82 @@ def render_consulta_imagens(
             )
 
             # --------------------------------------------------
-            # FILTROS
+            # PRÉ-PROCESSAMENTO
             # --------------------------------------------------
-            f_clahe = filtro_clahe(img_original_bgr)
-            f_fundo = filtro_correcao_fundo(img_original_bgr)
-            f_dog = filtro_dog(img_original_bgr)
-            f_canny = filtro_canny(img_original_bgr)
-            f_adapt = filtro_adaptativo(img_original_bgr)
-            f_grad = filtro_gradiente(img_original_bgr)
+            mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
 
-            f_clahe_m = mascarar_regioes_fixas(f_clahe)
-            f_fundo_m = mascarar_regioes_fixas(f_fundo)
-            f_dog_m = mascarar_regioes_fixas(f_dog)
-            f_canny_m = mascarar_regioes_fixas(f_canny)
-            f_adapt_m = mascarar_regioes_fixas(f_adapt)
-            f_grad_m = mascarar_regioes_fixas(f_grad)
+            gray, med, blackhat, th_inv, opened = preprocessar_imagem(
+                img_original_bgr,
+                mask_exclusao
+            )
 
             st.markdown("## Tratamento inicial")
 
-            l1, l2, l3 = st.columns(3)
-            with l1:
+            p1, p2, p3 = st.columns(3)
+            with p1:
                 st.caption("Imagem original")
                 st.image(img_original_pil, use_container_width=True)
-            with l2:
-                st.caption("CLAHE")
-                st.image(f_clahe, use_container_width=True)
-            with l3:
-                st.caption("Correção de fundo")
-                st.image(f_fundo, use_container_width=True)
+            with p2:
+                st.caption("Filtro mediano")
+                st.image(med, use_container_width=True)
+            with p3:
+                st.caption("Black-hat / correção de fundo")
+                st.image(blackhat, use_container_width=True)
 
-            l4, l5, l6 = st.columns(3)
-            with l4:
-                st.caption("DoG")
-                st.image(f_dog, use_container_width=True)
-            with l5:
-                st.caption("Canny")
-                st.image(f_canny, use_container_width=True)
-            with l6:
+            p4, p5 = st.columns(2)
+            with p4:
                 st.caption("Threshold adaptativo")
-                st.image(f_adapt, use_container_width=True)
-
-            st.image(f_grad, caption="Gradiente de borda", use_container_width=True)
+                st.image(th_inv, use_container_width=True)
+            with p5:
+                st.caption("Máscara final para segmentação")
+                st.image(opened, use_container_width=True)
 
             # --------------------------------------------------
-            # DETECÇÃO HÍBRIDA
+            # WATERSHED
             # --------------------------------------------------
-            circulos_hough_1 = detectar_bolhas_hough(
-                f_clahe_m,
-                sensibilidade_busca,
-                distancia_minima,
-                forca_borda,
-                rigor_confirmacao,
-                raio_minimo,
-                raio_maximo
+            markers, dist_norm, sure_fg, sure_bg = segmentar_por_watershed(opened)
+            img_segmentacao = desenhar_segmentacao(markers)
+
+            st.markdown("## Segmentação")
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                st.caption("Mapa de distância")
+                st.image(dist_norm, use_container_width=True)
+            with s2:
+                st.caption("Foreground seguro")
+                st.image(sure_fg, use_container_width=True)
+            with s3:
+                st.caption("Watershed")
+                st.image(cv_to_pil(img_segmentacao), use_container_width=True)
+
+            # --------------------------------------------------
+            # EXTRAÇÃO / FILTRO DE BOLHAS
+            # --------------------------------------------------
+            bolhas_brutas = extrair_bolhas_dos_markers(markers, raio_minimo, raio_maximo)
+            bolhas_filtradas = filtrar_bolhas_segmentadas(
+                bolhas_brutas,
+                circularidade_min,
+                solidez_min,
+                area_min_px,
+                area_max_px
             )
+            bolhas_filtradas = filtrar_borda_bolhas(bolhas_filtradas, img_original_bgr.shape)
+            bolhas_filtradas = remover_bolhas_muito_proximas(bolhas_filtradas, fator=0.55)
 
-            circulos_hough_2 = detectar_bolhas_hough(
-                f_fundo_m,
-                sensibilidade_busca,
-                distancia_minima,
-                forca_borda,
-                rigor_confirmacao,
-                raio_minimo,
-                raio_maximo
-            )
+            st.markdown("## Diagnóstico da segmentação")
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Componentes brutos", len(bolhas_brutas))
+            d2.metric("Após filtros geométricos", len(bolhas_filtradas))
+            d3.metric("Final", len(bolhas_filtradas))
 
-            circulos_hough_3 = detectar_bolhas_hough(
-                f_grad_m,
-                sensibilidade_busca,
-                distancia_minima,
-                forca_borda,
-                rigor_confirmacao,
-                raio_minimo,
-                raio_maximo
-            )
-
-            circulos_contorno_1 = detectar_bolhas_contorno(f_adapt_m, raio_minimo, raio_maximo)
-            circulos_contorno_2 = detectar_bolhas_contorno(f_canny_m, raio_minimo, raio_maximo)
-            circulos_watershed = detectar_bolhas_watershed(f_fundo_m, raio_minimo, raio_maximo)
-
-            circulos = (
-                circulos_hough_1
-                + circulos_hough_2
-                + circulos_hough_3
-                + circulos_contorno_1
-                + circulos_contorno_2
-                + circulos_watershed
-            )
-
-            circulos = remover_circulos_duplicados(circulos, fator=0.72)
-            circulos = filtrar_circulos_borda(circulos, img_original_bgr.shape)
-            circulos = remover_circulos_muito_grandes(circulos, img_original_bgr.shape)
-            circulos = filtrar_por_assinatura_radial(f_fundo, circulos)
-            circulos = remover_circulos_duplicados(circulos, fator=0.78)
-
-            st.markdown("## Diagnóstico da detecção")
-            d1, d2, d3, d4, d5, d6, d7 = st.columns(7)
-            d1.metric("Hough CLAHE", len(circulos_hough_1))
-            d2.metric("Hough Fundo", len(circulos_hough_2))
-            d3.metric("Hough Grad.", len(circulos_hough_3))
-            d4.metric("Contorno adapt.", len(circulos_contorno_1))
-            d5.metric("Contorno Canny", len(circulos_contorno_2))
-            d6.metric("Watershed", len(circulos_watershed))
-            d7.metric("Final", len(circulos))
-
-            if not circulos:
+            if not bolhas_filtradas:
                 st.warning("Nenhuma bolha foi detectada com os parâmetros atuais.")
                 return
 
             # --------------------------------------------------
             # RESULTADOS
             # --------------------------------------------------
-            df = montar_dataframe_medidas(circulos, px_per_mm)
+            df = montar_dataframe_medidas(bolhas_filtradas, px_per_mm)
 
             total_bolhas = len(df)
             media_um = df["Diâmetro (µm)"].mean()
@@ -725,7 +626,7 @@ def render_consulta_imagens(
             qtd_maiores_500 = len(maiores_500)
             pct_maiores_500 = (qtd_maiores_500 / total_bolhas) * 100 if total_bolhas > 0 else 0
 
-            img_anotada = desenhar_bolhas(img_original_bgr, circulos, px_per_mm)
+            img_anotada = desenhar_bolhas(img_original_bgr, bolhas_filtradas, px_per_mm)
 
             st.markdown("## Imagem com bolhas medidas")
             st.image(cv_to_pil(img_anotada), use_container_width=True)
