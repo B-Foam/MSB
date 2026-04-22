@@ -2,6 +2,7 @@ import io
 import requests
 import streamlit as st
 import numpy as np
+import pandas as pd
 import cv2
 from PIL import Image
 
@@ -91,141 +92,117 @@ def detectar_barra_escala_px(img_bgr):
 
 
 # ============================================================
-# MÁSCARAS FIXAS
+# MÁSCARA DAS REGIÕES FIXAS
 # ============================================================
 def criar_mascara_regioes_excluidas(shape):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    # Faixa superior com texto
+    # topo com texto
     mask[0:int(h * 0.05), :] = 255
 
-    # Barra de escala e canto inferior esquerdo
+    # barra de escala / canto inferior esquerdo
     mask[int(h * 0.78):h, 0:int(w * 0.22)] = 255
 
     return mask
 
 
-def aplicar_mascara_exclusao(img_gray, mask_exclusao):
+def aplicar_mascara_exclusao(img_gray, mask_exclusao, valor=255):
     out = img_gray.copy()
-    out[mask_exclusao == 255] = 255
+    out[mask_exclusao == 255] = valor
     return out
 
 
 # ============================================================
-# FILTROS DE DIAGNÓSTICO
+# PIPELINE: CLAHE -> BILATERAL -> BLACK-HAT -> ADAPTIVE THRESH
 # ============================================================
-def gerar_filtros_diagnostico(img_bgr, mask_exclusao):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = aplicar_mascara_exclusao(gray, mask_exclusao)
-
-    filtros = {}
-
-    filtros["Cinza"] = gray
-
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    filtros["CLAHE"] = clahe
-
-    bilateral = cv2.bilateralFilter(clahe, 9, 75, 75)
-    filtros["Bilateral"] = bilateral
-
-    mediana = cv2.medianBlur(clahe, 5)
-    filtros["Mediana"] = mediana
-
-    gauss = cv2.GaussianBlur(clahe, (5, 5), 0)
-    filtros["Gaussiano"] = gauss
-
-    # Gradiente morfológico
-    kernel_grad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    grad_morf = cv2.morphologyEx(bilateral, cv2.MORPH_GRADIENT, kernel_grad)
-    filtros["Gradiente morfológico"] = grad_morf
-
-    # Laplaciano
-    lap = cv2.Laplacian(gauss, cv2.CV_8U, ksize=3)
-    filtros["Laplaciano"] = lap
-
-    # DoG suave
-    g1 = cv2.GaussianBlur(clahe, (0, 0), 1.0)
-    g2 = cv2.GaussianBlur(clahe, (0, 0), 2.0)
-    dog = cv2.subtract(g2, g1)
-    dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX)
-    filtros["DoG suave"] = dog
-
-    # Canny fraco
-    canny = cv2.Canny(gauss, 15, 60)
-    filtros["Canny fraco"] = canny
-
-    # Canny médio
-    canny2 = cv2.Canny(gauss, 30, 90)
-    filtros["Canny médio"] = canny2
-
-    # Threshold adaptativo 1
-    th1 = cv2.adaptiveThreshold(
-        bilateral,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        31,
-        2
-    )
-    th1[mask_exclusao == 255] = 0
-    filtros["Adaptativo 31x31 C=2"] = th1
-
-    # Threshold adaptativo 2
-    th2 = cv2.adaptiveThreshold(
-        bilateral,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        51,
-        4
-    )
-    th2[mask_exclusao == 255] = 0
-    filtros["Adaptativo 51x51 C=4"] = th2
-
-    # Otsu
-    _, otsu = cv2.threshold(
-        bilateral,
-        0,
-        255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
-    otsu[mask_exclusao == 255] = 0
-    filtros["Otsu"] = otsu
-
-    return filtros
-
-
-# ============================================================
-# CONTORNOS
-# ============================================================
-def extrair_contornos_candidatos(
-    img_gray,
-    area_min,
-    area_max,
-    circularidade_min
+def preprocessar_pipeline_blackhat(
+    img_bgr,
+    mask_exclusao,
+    clip_limit,
+    bilateral_d,
+    bilateral_sigma_color,
+    bilateral_sigma_space,
+    kernel_blackhat,
+    block_size,
+    c_value,
+    usar_reforco
 ):
-    # Garantir binário
-    if img_gray.dtype != np.uint8:
-        img_gray = img_gray.astype(np.uint8)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    gray = aplicar_mascara_exclusao(gray, mask_exclusao, valor=255)
 
-    # Se não for binário, binariza com Otsu
-    valores_unicos = np.unique(img_gray)
-    if len(valores_unicos) > 4:
-        _, bin_img = cv2.threshold(
-            img_gray,
-            0,
-            255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
+    # 1) CLAHE
+    clahe = cv2.createCLAHE(
+        clipLimit=clip_limit,
+        tileGridSize=(8, 8)
+    )
+    clahe_img = clahe.apply(gray)
+
+    # 2) Bilateral
+    bilateral = cv2.bilateralFilter(
+        clahe_img,
+        d=bilateral_d,
+        sigmaColor=bilateral_sigma_color,
+        sigmaSpace=bilateral_sigma_space
+    )
+
+    # 3) Black-Hat
+    kernel_bh = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_blackhat, kernel_blackhat)
+    )
+    blackhat = cv2.morphologyEx(bilateral, cv2.MORPH_BLACKHAT, kernel_bh)
+    blackhat_norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+
+    # 4) Reforço opcional
+    if usar_reforco:
+        imagem_para_limiar = cv2.addWeighted(bilateral, 1.0, blackhat_norm, 2.0, 0)
+        imagem_para_limiar = cv2.normalize(imagem_para_limiar, None, 0, 255, cv2.NORM_MINMAX)
     else:
-        bin_img = img_gray.copy()
+        imagem_para_limiar = blackhat_norm
 
-    # Se maioria do objeto estiver preta, inverter
-    if np.mean(bin_img) > 127:
-        bin_img = cv2.bitwise_not(bin_img)
+    # blockSize precisa ser ímpar
+    if block_size % 2 == 0:
+        block_size += 1
 
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 5) Threshold adaptativo
+    th = cv2.adaptiveThreshold(
+        imagem_para_limiar,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        block_size,
+        c_value
+    )
+
+    # inverter para deixar o contorno candidato em branco
+    th_inv = cv2.bitwise_not(th)
+
+    # remover regiões excluídas
+    th_inv[mask_exclusao == 255] = 0
+
+    # 6) Limpeza leve
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask = cv2.morphologyEx(th_inv, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    return {
+        "gray": gray,
+        "clahe": clahe_img,
+        "bilateral": bilateral,
+        "blackhat": blackhat,
+        "blackhat_norm": blackhat_norm,
+        "realcado": imagem_para_limiar,
+        "threshold": th,
+        "mask": mask
+    }
+
+
+# ============================================================
+# CONTORNOS CANDIDATOS
+# ============================================================
+def extrair_contornos_candidatos(mask, area_min, area_max, circularidade_min):
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     candidatos = []
 
@@ -243,14 +220,15 @@ def extrair_contornos_candidatos(
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
+
         candidatos.append({
             "contorno": cnt,
-            "area": area,
-            "circularidade": circularidade,
+            "area": float(area),
+            "circularidade": float(circularidade),
             "bbox": (x, y, w, h)
         })
 
-    return candidatos, bin_img
+    return candidatos
 
 
 def desenhar_contornos(img_bgr, candidatos):
@@ -274,8 +252,22 @@ def desenhar_contornos(img_bgr, candidatos):
     return out
 
 
+def montar_resumo_contornos(candidatos):
+    if not candidatos:
+        return pd.DataFrame(columns=["Contornos", "Area media", "Circularidade media"])
+
+    areas = [c["area"] for c in candidatos]
+    circ = [c["circularidade"] for c in candidatos]
+
+    return pd.DataFrame([{
+        "Contornos": len(candidatos),
+        "Area media": round(float(np.mean(areas)), 2),
+        "Circularidade media": round(float(np.mean(circ)), 4)
+    }])
+
+
 # ============================================================
-# PIPELINE PRINCIPAL DE DIAGNÓSTICO
+# TELA PRINCIPAL
 # ============================================================
 def render_consulta_imagens(
     listar_imagens_supabase,
@@ -308,21 +300,42 @@ def render_consulta_imagens(
 
         url_imagem = montar_url_publica(escolhido)
 
-        st.markdown("## Configurações do diagnóstico")
+        st.markdown("## Configurações do pipeline")
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            clip_limit = st.slider("CLAHE - contraste local", 1.0, 5.0, 2.0, 0.1)
+            bilateral_d = st.slider("Bilateral - diâmetro", 3, 15, 9, 2)
+            bilateral_sigma_color = st.slider("Bilateral - sigma cor", 10, 150, 75, 5)
+
+        with col2:
+            bilateral_sigma_space = st.slider("Bilateral - sigma espaço", 10, 150, 75, 5)
+            kernel_blackhat = st.slider("Black-Hat - kernel", 5, 41, 15, 2)
+            if kernel_blackhat % 2 == 0:
+                kernel_blackhat += 1
+            usar_reforco = st.checkbox("Usar reforço do Black-Hat", value=True)
+
+        with col3:
+            block_size = st.slider("Threshold - bloco local", 11, 151, 51, 2)
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = st.slider("Threshold - ajuste fino (C)", 0, 15, 3, 1)
+
+        st.markdown("## Configurações dos contornos")
+
+        col4, col5, col6 = st.columns(3)
+        with col4:
             area_min = st.slider("Área mínima do contorno (px²)", 5, 5000, 40, 5)
-        with c2:
+        with col5:
             area_max = st.slider("Área máxima do contorno (px²)", 100, 50000, 5000, 50)
-        with c3:
+        with col6:
             circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.20, 0.01)
 
         try:
             img_original_pil = baixar_imagem(url_imagem)
             img_original_bgr = pil_to_cv(img_original_pil)
 
-            # Calibração
+            # calibração
             barra_px_auto, img_calibracao = detectar_barra_escala_px(img_original_bgr)
 
             st.markdown("## Calibração")
@@ -337,70 +350,81 @@ def render_consulta_imagens(
                 use_container_width=True
             )
 
-            # Máscara fixa
+            # preprocessamento
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
 
-            # Filtros
-            filtros = gerar_filtros_diagnostico(img_original_bgr, mask_exclusao)
+            resultado = preprocessar_pipeline_blackhat(
+                img_bgr=img_original_bgr,
+                mask_exclusao=mask_exclusao,
+                clip_limit=clip_limit,
+                bilateral_d=bilateral_d,
+                bilateral_sigma_color=bilateral_sigma_color,
+                bilateral_sigma_space=bilateral_sigma_space,
+                kernel_blackhat=kernel_blackhat,
+                block_size=block_size,
+                c_value=c_value,
+                usar_reforco=usar_reforco
+            )
 
-            st.markdown("## Diagnóstico dos filtros")
+            st.markdown("## Diagnóstico do pré-processamento")
 
-            nomes = list(filtros.keys())
+            p1, p2, p3 = st.columns(3)
+            with p1:
+                st.caption("Imagem original")
+                st.image(img_original_pil, use_container_width=True)
+            with p2:
+                st.caption("CLAHE")
+                st.image(resultado["clahe"], use_container_width=True)
+            with p3:
+                st.caption("Filtro bilateral")
+                st.image(resultado["bilateral"], use_container_width=True)
 
-            # Mostrar filtros em grade 3 colunas
-            for i in range(0, len(nomes), 3):
-                cols = st.columns(3)
-                for j in range(3):
-                    idx = i + j
-                    if idx < len(nomes):
-                        nome = nomes[idx]
-                        with cols[j]:
-                            st.caption(nome)
-                            st.image(filtros[nome], use_container_width=True)
+            p4, p5, p6 = st.columns(3)
+            with p4:
+                st.caption("Black-Hat")
+                st.image(resultado["blackhat"], use_container_width=True)
+            with p5:
+                st.caption("Black-Hat normalizado")
+                st.image(resultado["blackhat_norm"], use_container_width=True)
+            with p6:
+                st.caption("Imagem reforçada")
+                st.image(resultado["realcado"], use_container_width=True)
+
+            p7, p8 = st.columns(2)
+            with p7:
+                st.caption("Threshold adaptativo")
+                st.image(resultado["threshold"], use_container_width=True)
+            with p8:
+                st.caption("Máscara final")
+                st.image(resultado["mask"], use_container_width=True)
+
+            # contornos
+            candidatos = extrair_contornos_candidatos(
+                resultado["mask"],
+                area_min=area_min,
+                area_max=area_max,
+                circularidade_min=circularidade_min
+            )
+
+            img_contornos = desenhar_contornos(img_original_bgr, candidatos)
 
             st.markdown("## Diagnóstico dos contornos")
 
-            resultados = []
+            cta, ctb = st.columns(2)
+            with cta:
+                st.caption(f"Máscara final — {len(candidatos)} contornos")
+                st.image(resultado["mask"], use_container_width=True)
+            with ctb:
+                st.caption("Contornos sobre a imagem original")
+                st.image(cv_to_pil(img_contornos), use_container_width=True)
 
-            for nome, img_filtro in filtros.items():
-                candidatos, bin_img = extrair_contornos_candidatos(
-                    img_filtro,
-                    area_min=area_min,
-                    area_max=area_max,
-                    circularidade_min=circularidade_min
-                )
-
-                img_contornos = desenhar_contornos(img_original_bgr, candidatos)
-
-                resultados.append({
-                    "nome": nome,
-                    "binaria": bin_img,
-                    "candidatos": candidatos,
-                    "imagem_contornos": img_contornos,
-                    "quantidade": len(candidatos)
-                })
-
-            # Ordenar por quantidade crescente só para facilitar leitura
-            resultados = sorted(resultados, key=lambda x: x["quantidade"])
-
-            for r in resultados:
-                st.markdown(f"### {r['nome']}")
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.caption(f"Máscara / binário — {r['quantidade']} contornos")
-                    st.image(r["binaria"], use_container_width=True)
-                with col_b:
-                    st.caption("Contornos sobre a imagem original")
-                    st.image(cv_to_pil(r["imagem_contornos"]), use_container_width=True)
-
-            resumo = [{"Filtro": r["nome"], "Quantidade de contornos": r["quantidade"]} for r in resultados]
             st.markdown("## Resumo")
-            st.dataframe(resumo, use_container_width=True)
+            st.dataframe(montar_resumo_contornos(candidatos), use_container_width=True)
 
             st.info(
-                "Objetivo desta etapa: identificar visualmente qual filtro gera "
-                "contornos mais próximos das bordas reais das bolhas, antes de "
-                "voltar para a segmentação e medição."
+                "Esta etapa serve para validar visualmente se o pipeline "
+                "CLAHE → Bilateral → Black-Hat → Adaptive Threshold está "
+                "gerando contornos candidatos próximos das bordas reais das bolhas."
             )
 
         except Exception as e:
