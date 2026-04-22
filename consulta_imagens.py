@@ -36,11 +36,12 @@ def _basename(path: str) -> str:
 
 def normalizar_lista_imagens(lista_bruta) -> List[Dict]:
     """
-    Tenta aceitar diferentes formatos vindos do Supabase/listagem:
+    Aceita diferentes formatos vindos da listagem:
     - ["img1.jpg", "img2.jpg"]
     - [{"name": "img1.jpg", "path": "pasta/img1.jpg"}]
     - [{"nome": "...", "caminho": "..."}]
     - [{"path": "..."}]
+    - [{"url": "..."}]
     """
     itens = []
 
@@ -85,7 +86,6 @@ def normalizar_lista_imagens(lista_bruta) -> List[Dict]:
                 "url": url,
             })
 
-    # remove duplicados simples por nome+path
     vistos = set()
     filtrados = []
     for it in itens:
@@ -152,7 +152,6 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
     """
     h, w = img_bgr.shape[:2]
 
-    # região típica da barra: parte inferior esquerda
     x0 = 0
     y0 = int(h * 0.72)
     x1 = int(w * 0.38)
@@ -161,7 +160,6 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
     roi = img_bgr[y0:y1, x0:x1].copy()
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-    # verde brilhante
     lower = np.array([35, 70, 70], dtype=np.uint8)
     upper = np.array([95, 255, 255], dtype=np.uint8)
     mask = cv2.inRange(hsv, lower, upper)
@@ -180,11 +178,8 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
         area = ww * hh
         if area < 20:
             continue
-
-        # barra horizontal
         if ww < 20:
             continue
-
         if hh > 20:
             continue
 
@@ -206,7 +201,7 @@ def detectar_barra_escala(img_bgr: np.ndarray) -> Optional[Dict]:
         "y1": y0 + y + hh // 2,
         "x2": x0 + x + ww,
         "y2": y0 + y + hh // 2,
-        "px_per_mm": float(ww),  # assumindo barra = 1,0 mm
+        "px_per_mm": float(ww),
     }
 
 
@@ -222,12 +217,10 @@ def desenhar_roi_e_calibracao(
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
-    # escurece fora da ROI
     mask = criar_mascara_roi((h, w), roi_info)
     escura = (out * 0.45).astype(np.uint8)
     out = np.where(mask[:, :, None] == 255, out, escura)
 
-    # borda ROI
     cv2.circle(
         out,
         (int(roi_info["cx"]), int(roi_info["cy"])),
@@ -237,7 +230,6 @@ def desenhar_roi_e_calibracao(
         lineType=cv2.LINE_AA,
     )
 
-    # barra
     if barra_info is not None:
         x1, y1 = int(barra_info["x1"]), int(barra_info["y1"])
         x2, y2 = int(barra_info["x2"]), int(barra_info["y2"])
@@ -266,12 +258,10 @@ def desenhar_bolhas_detectadas(
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
-    # escurece fora da ROI
     mask = criar_mascara_roi((h, w), roi_info)
     escura = (out * 0.45).astype(np.uint8)
     out = np.where(mask[:, :, None] == 255, out, escura)
 
-    # borda ROI
     cv2.circle(
         out,
         (int(roi_info["cx"]), int(roi_info["cy"])),
@@ -281,7 +271,6 @@ def desenhar_bolhas_detectadas(
         lineType=cv2.LINE_AA,
     )
 
-    # desenha círculos sobre a imagem original
     for i, b in enumerate(bolhas):
         cor = CORES_BOLHAS[i % len(CORES_BOLHAS)]
         x = int(round(b["x"]))
@@ -291,7 +280,6 @@ def desenhar_bolhas_detectadas(
         esp = 2 if r < 18 else 3
         cv2.circle(out, (x, y), r, cor, esp, lineType=cv2.LINE_AA)
 
-    # barra
     if barra_info is not None:
         x1, y1 = int(barra_info["x1"]), int(barra_info["y1"])
         x2, y2 = int(barra_info["x2"]), int(barra_info["y2"])
@@ -484,7 +472,6 @@ def remover_pequenas_dentro_de_grandes(candidatos: List[Dict]) -> List[Dict]:
             dy = bj["y"] - bi["y"]
             dist = math.sqrt(dx * dx + dy * dy)
 
-            # remove bolhas pequenas muito internas
             if bj["r"] < 0.52 * bi["r"] and dist + bj["r"] < 0.92 * bi["r"]:
                 manter[j] = False
 
@@ -507,7 +494,6 @@ def detectar_bolhas_primeiro_plano(
     gray_eq = prep["gray_eq"]
     focus = prep["focus"]
 
-    # detecta em dois mapas: focus e gray_blur
     fontes = [
         ("focus", focus, 0.42),
         ("gray", gray_blur, 0.42),
@@ -582,7 +568,6 @@ def detectar_bolhas_primeiro_plano(
                 if met is None:
                     continue
 
-                # filtros mínimos
                 if met["focus_ring"] < 18:
                     continue
                 if met["ring_darkness"] < 1.7:
@@ -614,7 +599,6 @@ def detectar_bolhas_primeiro_plano(
     arr_focus = np.array([c["focus_ring"] for c in candidatos], dtype=np.float32)
     arr_dark = np.array([c["ring_darkness"] for c in candidatos], dtype=np.float32)
 
-    # filtro adaptativo: prioriza primeiro plano, mas não mata demais
     thr_score = max(22.0, float(np.percentile(arr_score, 50)))
     thr_focus = max(18.0, float(np.percentile(arr_focus, 45)))
     thr_dark = max(1.7, float(np.percentile(arr_dark, 45)))
@@ -626,10 +610,8 @@ def detectar_bolhas_primeiro_plano(
         and c["ring_darkness"] >= thr_dark
     ]
 
-    # segunda passada: evita excesso de bolhas pequenas fracas
     bolhas_filtradas = []
     for b in bolhas:
-        # regra adicional: bolhas pequenas exigem score melhor
         if b["r"] < 10 and b["score"] < (thr_score + 5):
             continue
         if b["r"] < 8 and b["focus_ring"] < (thr_focus + 4):
@@ -762,11 +744,10 @@ def render_consulta_imagens(
     key_bolhas = f"bolhas::{chave_img}"
     bolhas = session_state.get(key_bolhas, [])
 
+    st.markdown("### Imagem 2 — bolhas detectadas")
     if bolhas:
-        st.markdown("### Imagem 2 — bolhas detectadas")
         img2 = desenhar_bolhas_detectadas(img_bgr, roi_info, barra_info, bolhas)
         st.image(bgr_to_rgb(img2), use_container_width=True)
         st.info(f"Bolhas detectadas: {len(bolhas)}")
     else:
-        st.markdown("### Imagem 2 — bolhas detectadas")
         st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
