@@ -39,9 +39,15 @@ def garantir_estado(session_state):
 # BARRA DE ESCALA
 # ============================================================
 def detectar_barra_escala_px(img_bgr: np.ndarray):
+    """
+    Detecta a barra de escala na região inferior esquerda.
+    Retorna:
+      px_per_mm, imagem_anotada, barra_info
+    """
     img_annot = img_bgr.copy()
     h, w = img_bgr.shape[:2]
 
+    # Região de busca inferior esquerda
     x0 = 0
     x1 = int(w * 0.35)
     y0 = int(h * 0.78)
@@ -50,6 +56,7 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
     crop = img_bgr[y0:y1, x0:x1].copy()
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
+    # procurar elementos escuros
     _, th = cv2.threshold(gray, 95, 255, cv2.THRESH_BINARY_INV)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
     th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
@@ -64,6 +71,7 @@ def detectar_barra_escala_px(img_bgr: np.ndarray):
         aspect = ww / max(hh, 1)
         area = ww * hh
 
+        # barra horizontal longa
         if ww > 60 and hh < 25 and aspect > 4.5 and area > melhor_area:
             melhor_area = area
             melhor = (x, y, ww, hh)
@@ -107,7 +115,13 @@ def criar_mascara_roi(shape, roi_info: Dict[str, int], barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
+    cv2.circle(
+        mask,
+        (int(roi_info["cx"]), int(roi_info["cy"])),
+        int(roi_info["r"]),
+        255,
+        -1,
+    )
 
     # remove cabeçalho superior
     topo = int(h * 0.045)
@@ -125,236 +139,66 @@ def criar_mascara_roi(shape, roi_info: Dict[str, int], barra_info=None):
     return mask
 
 
-def ponto_totalmente_dentro_roi(x: float, y: float, r: float, roi_info: Dict[str, int]) -> bool:
-    dx = x - roi_info["cx"]
-    dy = y - roi_info["cy"]
-    dist = math.hypot(dx, dy)
-    return dist + r <= roi_info["r"]
-
-
 # ============================================================
-# PRÉ-PROCESSAMENTO
+# SEGMENTAÇÃO POR WATERSHED (CORREÇÃO DO RUÍDO)
 # ============================================================
-def preprocessar_variantes(img_bgr: np.ndarray, mask_roi: np.ndarray):
+def preprocessar_para_watershed(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
-    img_clahe = clahe.apply(gray)
+    # 1. Filtro Bilateral mais agressivo para suavizar a textura interna das bolhas
+    bilateral = cv2.bilateralFilter(gray, 15, 80, 80)
 
-    bilateral = cv2.bilateralFilter(img_clahe, 9, 75, 75)
+    # 2. Threshold Adaptativo (Invertido, pois paredes são escuras)
+    # A área útil é isolada pela máscara ROI
+    img_roi = cv2.bitwise_and(bilateral, bilateral, mask=mask_roi)
+    thresh = cv2.adaptiveThreshold(img_roi, 255, 
+                                   cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 21, 5)
 
-    blur = cv2.GaussianBlur(bilateral, (0, 0), 1.2)
-    sharpen = cv2.addWeighted(bilateral, 1.50, blur, -0.50, 0)
+    # 3. Limpeza morfológica para remover ruído
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    grad = cv2.morphologyEx(
-        sharpen,
-        cv2.MORPH_GRADIENT,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
-    )
-
-    dog = cv2.absdiff(
-        cv2.GaussianBlur(sharpen, (0, 0), 1.0),
-        cv2.GaussianBlur(sharpen, (0, 0), 2.8),
-    )
-
-    blackhat = cv2.morphologyEx(
-        sharpen,
-        cv2.MORPH_BLACKHAT,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
-    )
-
-    canny = cv2.Canny(sharpen, 35, 110)
-    canny = cv2.GaussianBlur(canny, (3, 3), 0)
-
-    grad = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    variantes = {
-        "gray": gray,
-        "clahe": img_clahe,
-        "bilateral": bilateral,
-        "sharpen": sharpen,
-        "grad": grad,
-        "dog": dog,
-        "blackhat": blackhat,
-        "canny": canny,
-    }
-
-    for k in variantes:
-        img = variantes[k].copy()
-        img[mask_roi == 0] = 0
-        variantes[k] = img
-
-    return variantes
+    return gray, opening
 
 
-# ============================================================
-# SCORE DO CÍRCULO
-# ============================================================
-def score_circulo_borda(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
-    x = int(round(x))
-    y = int(round(y))
-    r = int(round(r))
+def detectar_bolhas_watershed(img_gray, opening, mask_roi, roi_info):
+    # 4. Transformada de distância (separa bolhas conectadas)
+    dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
 
-    if r < 3:
-        return 0.0
+    # 5. Threshold nos marcadores (Aqui definimos o centro de cada bolha)
+    # O valor 0.35 é o "foco". Aumente para separar mais, diminua para pegar menores.
+    _, sure_fg = cv2.threshold(dist_transform, 0.35 * dist_transform.max(), 255, 0)
 
-    h, w = ref_img.shape[:2]
+    # 6. Watershed
+    sure_fg = np.uint8(sure_fg)
+    _, markers = cv2.connectedComponents(sure_fg)
+    markers = markers + 1
+    
+    # Adicionamos uma "fronteira" para evitar que o Watershed "fuja"
+    cv2.circle(markers, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 0, 2)
+    
+    # Região desconhecida (fundo da ROI) = 0
+    markers[opening == 0] = 0
 
-    r_inner = max(1, int(r * 0.50))
-    r_ring1 = max(2, int(r * 0.78))
-    r_ring2 = max(r_ring1 + 1, int(r * 1.12))
-    r_outer1 = max(r_ring2 + 1, int(r * 1.15))
-    r_outer2 = max(r_outer1 + 1, int(r * 1.42))
+    img_bgr = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
+    labels = cv2.watershed(img_bgr, markers)
 
-    pad = r_outer2 + 3
-    x0 = max(0, x - pad)
-    x1 = min(w, x + pad + 1)
-    y0 = max(0, y - pad)
-    y1 = min(h, y + pad + 1)
-
-    crop = ref_img[y0:y1, x0:x1]
-    if crop.size == 0:
-        return 0.0
-
-    yy, xx = np.indices(crop.shape)
-    xx = xx + x0
-    yy = yy + y0
-    dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
-
-    centro = dist <= r_inner
-    anel = (dist >= r_ring1) & (dist <= r_ring2)
-    externo = (dist >= r_outer1) & (dist <= r_outer2)
-
-    if np.count_nonzero(anel) < 8 or np.count_nonzero(centro) < 8 or np.count_nonzero(externo) < 8:
-        return 0.0
-
-    mean_centro = float(np.mean(crop[centro]))
-    mean_anel = float(np.mean(crop[anel]))
-    mean_externo = float(np.mean(crop[externo]))
-
-    score = mean_anel - 0.35 * mean_centro - 0.20 * mean_externo
-    return float(score)
-
-
-# ============================================================
-# FUSÃO DE CANDIDATOS
-# ============================================================
-def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
-    if not candidatos:
-        return []
-
-    candidatos = sorted(candidatos, key=lambda c: c["score"], reverse=True)
-    finais = []
-
-    for c in candidatos:
-        manter = True
-        for f in finais:
-            dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
-            r_ref = max(c["r"], f["r"])
-
-            if dist < 0.35 * r_ref and abs(c["r"] - f["r"]) < 0.28 * r_ref:
-                manter = False
-                break
-
-        if manter:
-            finais.append(c)
-
-    finais = sorted(finais, key=lambda c: c["score"], reverse=True)
-
-    if len(finais) > 1800:
-        finais = finais[:1800]
-
-    return finais
-
-
-# ============================================================
-# DETECÇÃO AGRESSIVA
-# ============================================================
-def detectar_bolhas_multiescala(
-    img_bgr: np.ndarray,
-    roi_info: Dict[str, int],
-    mask_roi: np.ndarray,
-    px_per_mm: Optional[float],
-):
-    variantes = preprocessar_variantes(img_bgr, mask_roi)
-
-    ref_score = cv2.addWeighted(variantes["grad"], 0.40, variantes["blackhat"], 0.60, 0)
-
+    # Extrair centros e raios a partir dos marcadores
     candidatos = []
+    for label in np.unique(labels):
+        if label <= 1: continue
 
-    if px_per_mm and px_per_mm > 0:
-        faixas = [
-            {"nome": "micro",   "minR": max(3, int(px_per_mm * 0.005)), "maxR": max(8,  int(px_per_mm * 0.020)), "minDist": max(4,  int(px_per_mm * 0.008)), "param2": 6},
-            {"nome": "pequena", "minR": max(6, int(px_per_mm * 0.018)), "maxR": max(13, int(px_per_mm * 0.035)), "minDist": max(6,  int(px_per_mm * 0.014)), "param2": 7},
-            {"nome": "media",   "minR": max(10, int(px_per_mm * 0.030)), "maxR": max(28, int(px_per_mm * 0.080)), "minDist": max(8, int(px_per_mm * 0.022)), "param2": 8},
-            {"nome": "grande",  "minR": max(22, int(px_per_mm * 0.070)), "maxR": max(80, int(px_per_mm * 0.220)), "minDist": max(14, int(px_per_mm * 0.045)), "param2": 10},
-        ]
-    else:
-        faixas = [
-            {"nome": "micro",   "minR": 3,  "maxR": 8,  "minDist": 4,  "param2": 6},
-            {"nome": "pequena", "minR": 6,  "maxR": 13, "minDist": 6,  "param2": 7},
-            {"nome": "media",   "minR": 10, "maxR": 28, "minDist": 8,  "param2": 8},
-            {"nome": "grande",  "minR": 22, "maxR": 80, "minDist": 14, "param2": 10},
-        ]
+        mask = np.zeros(img_gray.shape, dtype=np.uint8)
+        mask[labels == label] = 255
 
-    bases = [
-        variantes["gray"],
-        variantes["clahe"],
-        variantes["bilateral"],
-        variantes["sharpen"],
-        variantes["dog"],
-        variantes["blackhat"],
-        variantes["canny"],
-    ]
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in cnts:
+            if cv2.contourArea(cnt) > 20: # Filtro de área mínima
+                (x, y), r = cv2.minEnclosingCircle(cnt)
+                candidatos.append({"x": x, "y": y, "r": r, "score": 1.0})
 
-    for base in bases:
-        for faixa in faixas:
-            circles = cv2.HoughCircles(
-                base,
-                cv2.HOUGH_GRADIENT,
-                dp=1.08,
-                minDist=faixa["minDist"],
-                param1=85,
-                param2=faixa["param2"],
-                minRadius=faixa["minR"],
-                maxRadius=faixa["maxR"],
-            )
-
-            if circles is None:
-                continue
-
-            circles = np.round(circles[0, :]).astype(int)
-
-            for c in circles:
-                x, y, r = int(c[0]), int(c[1]), int(c[2])
-
-                if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
-                    continue
-
-                score = score_circulo_borda(ref_score, x, y, r)
-
-                if score < 1.2:
-                    continue
-
-                candidatos.append(
-                    {
-                        "x": float(x),
-                        "y": float(y),
-                        "r": float(r),
-                        "score": float(score),
-                    }
-                )
-
-    bolhas = fundir_candidatos(candidatos)
-
-    if len(bolhas) > 0:
-        scores = np.array([b["score"] for b in bolhas], dtype=float)
-        limiar = max(1.5, float(np.percentile(scores, 8)))
-        bolhas = [b for b in bolhas if b["score"] >= limiar]
-
-    return bolhas
+    return candidatos
 
 
 # ============================================================
@@ -393,7 +237,8 @@ def desenhar_bolhas_coloridas(
     h, w = shape[:2]
     out = np.zeros((h, w, 3), dtype=np.uint8)
 
-    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (245, 245, 245), -1)
+    # fundo preto + área útil branca
+    cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), -1)
 
     rng = np.random.default_rng(123)
 
@@ -403,11 +248,15 @@ def desenhar_bolhas_coloridas(
         r = int(round(b["r"]))
 
         color = tuple(int(v) for v in rng.integers(30, 256, size=3))
+
+        # preenchimento
         cv2.circle(out, (x, y), r, color, -1)
 
+        # contorno preto
         thickness = max(1, int(round(r * 0.10)))
         cv2.circle(out, (x, y), r, (0, 0, 0), thickness)
 
+        # número apenas para bolhas maiores
         if r >= 11:
             txt = str(i)
             cv2.putText(
@@ -421,8 +270,10 @@ def desenhar_bolhas_coloridas(
                 cv2.LINE_AA,
             )
 
+    # contorno externo da ROI
     cv2.circle(out, (roi_info["cx"], roi_info["cy"]), roi_info["r"], (255, 255, 255), 2)
 
+    # desenhar barra de escala
     if barra_info is not None:
         x, y, ww, hh = barra_info["x"], barra_info["y"], barra_info["w"], barra_info["h"]
         cv2.rectangle(out, (x, y), (x + ww, y + hh), (0, 255, 0), 2)
@@ -474,6 +325,7 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         px_per_mm, img_barra, barra_info = detectar_barra_escala_px(img_bgr)
 
+        # ROI por imagem
         if imagem_escolhida not in session_state.roi_consulta:
             session_state.roi_consulta[imagem_escolhida] = criar_roi_padrao(img_bgr.shape)
 
@@ -526,12 +378,8 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         if processar:
             with st.spinner("Detectando bolhas..."):
-                bolhas = detectar_bolhas_multiescala(
-                    img_bgr=img_bgr,
-                    roi_info=roi_info,
-                    mask_roi=mask_roi,
-                    px_per_mm=px_per_mm,
-                )
+                img_gray, opening = preprocessar_para_watershed(img_bgr, mask_roi)
+                bolhas = detectar_bolhas_watershed(img_gray, opening, mask_roi, roi_info)
 
                 img_final = desenhar_bolhas_coloridas(
                     shape=img_bgr.shape,
