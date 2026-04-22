@@ -115,53 +115,44 @@ def aplicar_mascara_exclusao(img_gray, mask_exclusao):
 
 
 # ============================================================
-# PRÉ-PROCESSAMENTO
+# PRÉ-PROCESSAMENTO OTIMIZADO
 # ============================================================
-def preprocessar_imagem(img_bgr, mask_exclusao):
+def preprocessar_imagem_otimizado(img_bgr, mask_exclusao):
+    """
+    Pipeline simplificado para gerar uma máscara mais limpa:
+    1) escala de cinza
+    2) máscara das regiões fixas
+    3) CLAHE
+    4) filtro bilateral
+    5) Otsu
+    6) fechamento morfológico leve
+    """
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray_mask = aplicar_mascara_exclusao(gray, mask_exclusao)
 
-    # 1) Bilateral: reduz textura interna preservando bordas
-    smooth = cv2.bilateralFilter(gray_mask, 9, 75, 75)
+    # 1) CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray_mask)
 
-    # 2) Top-hat: ajuda a uniformizar fundo / realçar detalhes claros locais
-    kernel_th = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
-    tophat = cv2.morphologyEx(smooth, cv2.MORPH_TOPHAT, kernel_th)
+    # 2) Bilateral
+    smooth = cv2.bilateralFilter(enhanced, 9, 75, 75)
 
-    # 3) Black-hat menor: ajuda a destacar bordas escuras sem exagerar
-    kernel_bh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    blackhat = cv2.morphologyEx(smooth, cv2.MORPH_BLACKHAT, kernel_bh)
-
-    # 4) Combinação
-    final_gray = cv2.add(smooth, tophat)
-    final_gray = cv2.subtract(final_gray, blackhat)
-    final_gray = cv2.normalize(final_gray, None, 0, 255, cv2.NORM_MINMAX)
-
-    # 5) Threshold adaptativo mais suave
-    th = cv2.adaptiveThreshold(
-        final_gray,
+    # 3) Otsu
+    _, th = cv2.threshold(
+        smooth,
+        0,
         255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        101,
-        5
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
     )
 
-    # inverter para trabalhar com objetos brancos
-    th_inv = cv2.bitwise_not(th)
+    # remove regiões excluídas
+    th[mask_exclusao == 255] = 0
 
-    # remover regiões excluídas
-    th_inv[mask_exclusao == 255] = 0
+    # 4) fechamento morfológico leve
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    cleaned = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    # fechamento morfológico
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    closed = cv2.morphologyEx(th_inv, cv2.MORPH_CLOSE, kernel_close, iterations=2)
-
-    # abertura leve
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_open, iterations=1)
-
-    return gray, smooth, tophat, blackhat, final_gray, th_inv, opened
+    return gray, enhanced, smooth, th, cleaned
 
 
 # ============================================================
@@ -450,34 +441,16 @@ def render_consulta_imagens(
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            raio_minimo = st.slider(
-                "Raio mínimo da bolha (px)",
-                4, 80, 6, 1
-            )
-            raio_maximo = st.slider(
-                "Raio máximo da bolha (px)",
-                20, 300, 90, 1
-            )
+            raio_minimo = st.slider("Raio mínimo da bolha (px)", 4, 80, 6, 1)
+            raio_maximo = st.slider("Raio máximo da bolha (px)", 20, 300, 90, 1)
 
         with col2:
-            circularidade_min = st.slider(
-                "Circularidade mínima",
-                0.10, 1.00, 0.35, 0.01
-            )
-            solidez_min = st.slider(
-                "Solidez mínima",
-                0.10, 1.00, 0.70, 0.01
-            )
+            circularidade_min = st.slider("Circularidade mínima", 0.10, 1.00, 0.35, 0.01)
+            solidez_min = st.slider("Solidez mínima", 0.10, 1.00, 0.70, 0.01)
 
         with col3:
-            area_min_px = st.slider(
-                "Área mínima da bolha (px²)",
-                10, 5000, 80, 10
-            )
-            area_max_px = st.slider(
-                "Área máxima da bolha (px²)",
-                100, 100000, 12000, 100
-            )
+            area_min_px = st.slider("Área mínima da bolha (px²)", 10, 5000, 80, 10)
+            area_max_px = st.slider("Área máxima da bolha (px²)", 100, 100000, 12000, 100)
 
         try:
             img_original_pil = baixar_imagem(url_imagem)
@@ -514,7 +487,7 @@ def render_consulta_imagens(
             # Pré-processamento
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
 
-            gray, smooth, tophat, blackhat, final_gray, th_inv, opened = preprocessar_imagem(
+            gray, enhanced, smooth, th, cleaned = preprocessar_imagem_otimizado(
                 img_original_bgr,
                 mask_exclusao
             )
@@ -526,27 +499,22 @@ def render_consulta_imagens(
                 st.caption("Imagem original")
                 st.image(img_original_pil, use_container_width=True)
             with p2:
+                st.caption("CLAHE")
+                st.image(enhanced, use_container_width=True)
+            with p3:
                 st.caption("Filtro bilateral")
                 st.image(smooth, use_container_width=True)
-            with p3:
-                st.caption("Top-Hat")
-                st.image(tophat, use_container_width=True)
 
-            p4, p5, p6 = st.columns(3)
+            p4, p5 = st.columns(2)
             with p4:
-                st.caption("Black-Hat")
-                st.image(blackhat, use_container_width=True)
+                st.caption("Threshold de Otsu")
+                st.image(th, use_container_width=True)
             with p5:
-                st.caption("Imagem combinada")
-                st.image(final_gray, use_container_width=True)
-            with p6:
-                st.caption("Threshold adaptativo")
-                st.image(th_inv, use_container_width=True)
-
-            st.image(opened, caption="Máscara final para segmentação", use_container_width=True)
+                st.caption("Máscara final para segmentação")
+                st.image(cleaned, use_container_width=True)
 
             # Watershed
-            markers, dist_norm, sure_fg, sure_bg = segmentar_por_watershed(opened)
+            markers, dist_norm, sure_fg, sure_bg = segmentar_por_watershed(cleaned)
             img_segmentacao = desenhar_segmentacao(markers)
 
             st.markdown("## Segmentação")
