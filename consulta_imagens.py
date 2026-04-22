@@ -131,86 +131,47 @@ def ponto_totalmente_dentro_roi(x: float, y: float, r: float, roi_info: Dict[str
 
 
 # ============================================================
-# NOVO PRÉ-PROCESSAMENTO BASEADO EM ANÉIS
+# PRÉ-PROCESSAMENTO RÁPIDO
 # ============================================================
-def preprocessar_para_aneis(img_bgr: np.ndarray, mask_roi: np.ndarray):
+def preprocessar_rapido(img_bgr: np.ndarray, mask_roi: np.ndarray):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray[mask_roi == 0] = 0
 
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8, 8))
     clahe_img = clahe.apply(gray)
 
-    bilateral = cv2.bilateralFilter(clahe_img, 9, 60, 60)
+    bilateral = cv2.bilateralFilter(clahe_img, 7, 60, 60)
 
-    # realce suave
-    blur = cv2.GaussianBlur(bilateral, (0, 0), 1.1)
+    blur = cv2.GaussianBlur(bilateral, (0, 0), 1.0)
     sharpen = cv2.addWeighted(bilateral, 1.35, blur, -0.35, 0)
 
-    # black-hat para realçar bordas escuras circulares
-    blackhat_small = cv2.morphologyEx(
+    blackhat = cv2.morphologyEx(
         sharpen,
         cv2.MORPH_BLACKHAT,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)),
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
     )
-
-    blackhat_big = cv2.morphologyEx(
-        sharpen,
-        cv2.MORPH_BLACKHAT,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)),
-    )
-
-    # mistura dos dois
-    blackhat = cv2.addWeighted(blackhat_small, 0.6, blackhat_big, 0.4, 0)
-
-    # gradiente morfológico
-    grad = cv2.morphologyEx(
-        sharpen,
-        cv2.MORPH_GRADIENT,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
-    )
-
-    # dog
-    dog = cv2.absdiff(
-        cv2.GaussianBlur(sharpen, (0, 0), 1.0),
-        cv2.GaussianBlur(sharpen, (0, 0), 2.4),
-    )
-
     blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    grad = cv2.normalize(grad, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    dog = cv2.normalize(dog, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # imagem final de anéis
-    aneis = cv2.addWeighted(blackhat, 0.55, grad, 0.25, 0)
-    aneis = cv2.addWeighted(aneis, 0.85, dog, 0.15, 0)
-    aneis = cv2.GaussianBlur(aneis, (3, 3), 0)
-
-    # threshold leve para formar bordas destacadas
-    _, th = cv2.threshold(aneis, 28, 255, cv2.THRESH_BINARY)
-
-    # fecha pequenos buracos de borda
+    _, mask = cv2.threshold(blackhat, 28, 255, cv2.THRESH_BINARY)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask[mask_roi == 0] = 0
 
-    th[mask_roi == 0] = 0
-    aneis[mask_roi == 0] = 0
+    sharpen[mask_roi == 0] = 0
+    blackhat[mask_roi == 0] = 0
 
     return {
         "gray": gray,
-        "clahe": clahe_img,
-        "bilateral": bilateral,
         "sharpen": sharpen,
         "blackhat": blackhat,
-        "grad": grad,
-        "dog": dog,
-        "aneis": aneis,
-        "mask": th,
+        "mask": mask,
     }
 
 
 # ============================================================
-# SCORE
+# SCORE SIMPLES
 # ============================================================
-def score_circulo_anel(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
+def score_circulo_rapido(ref_img: np.ndarray, x: float, y: float, r: float) -> float:
     x = int(round(x))
     y = int(round(y))
     r = int(round(r))
@@ -219,7 +180,7 @@ def score_circulo_anel(ref_img: np.ndarray, x: float, y: float, r: float) -> flo
         return 0.0
 
     h, w = ref_img.shape[:2]
-    pad = int(r * 1.5) + 3
+    pad = int(r * 1.4) + 3
 
     x0 = max(0, x - pad)
     x1 = min(w, x + pad + 1)
@@ -235,24 +196,21 @@ def score_circulo_anel(ref_img: np.ndarray, x: float, y: float, r: float) -> flo
     yy = yy + y0
     dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
 
-    centro = dist <= max(1, int(r * 0.50))
-    anel = (dist >= int(r * 0.78)) & (dist <= int(r * 1.15))
-    externo = (dist >= int(r * 1.18)) & (dist <= int(r * 1.42))
+    anel = (dist >= int(r * 0.80)) & (dist <= int(r * 1.15))
+    centro = dist <= int(r * 0.55)
 
-    if np.count_nonzero(anel) < 8:
+    if np.count_nonzero(anel) < 8 or np.count_nonzero(centro) < 8:
         return 0.0
 
     mean_anel = float(np.mean(crop[anel]))
-    mean_centro = float(np.mean(crop[centro])) if np.count_nonzero(centro) > 0 else 0.0
-    mean_externo = float(np.mean(crop[externo])) if np.count_nonzero(externo) > 0 else 0.0
-
-    return mean_anel - 0.30 * mean_centro - 0.15 * mean_externo
+    mean_centro = float(np.mean(crop[centro]))
+    return mean_anel - 0.28 * mean_centro
 
 
 # ============================================================
-# FUSÃO MAIS LEVE
+# FUSÃO MAIS RÁPIDA
 # ============================================================
-def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
+def fundir_candidatos_rapido(candidatos: List[Dict]) -> List[Dict]:
     if not candidatos:
         return []
 
@@ -265,21 +223,21 @@ def fundir_candidatos(candidatos: List[Dict]) -> List[Dict]:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
             r_ref = max(c["r"], f["r"])
 
-            if dist < 0.28 * r_ref and abs(c["r"] - f["r"]) < 0.22 * r_ref:
+            if dist < 0.32 * r_ref and abs(c["r"] - f["r"]) < 0.25 * r_ref:
                 manter = False
                 break
 
         if manter:
             finais.append(c)
 
-    if len(finais) > 2000:
-        finais = finais[:2000]
+    if len(finais) > 1200:
+        finais = finais[:1200]
 
     return finais
 
 
 # ============================================================
-# NOVA DETECÇÃO
+# DETECÇÃO MAIS RÁPIDA
 # ============================================================
 def detectar_bolhas_multiescala(
     img_bgr: np.ndarray,
@@ -287,32 +245,28 @@ def detectar_bolhas_multiescala(
     mask_roi: np.ndarray,
     px_per_mm: Optional[float],
 ):
-    proc = preprocessar_para_aneis(img_bgr, mask_roi)
+    proc = preprocessar_rapido(img_bgr, mask_roi)
 
-    # vamos usar principalmente a imagem de anéis e a máscara
     bases = [
-        proc["aneis"],
-        proc["mask"],
+        proc["sharpen"],
         proc["blackhat"],
-        proc["grad"],
+        proc["mask"],
     ]
 
-    ref_score = proc["aneis"]
+    ref_score = proc["blackhat"]
     candidatos = []
 
     if px_per_mm and px_per_mm > 0:
         faixas = [
-            {"minR": max(3, int(px_per_mm * 0.005)), "maxR": max(7, int(px_per_mm * 0.017)), "minDist": max(4, int(px_per_mm * 0.008)), "param2": 5},
-            {"minR": max(6, int(px_per_mm * 0.016)), "maxR": max(13, int(px_per_mm * 0.035)), "minDist": max(6, int(px_per_mm * 0.013)), "param2": 6},
-            {"minR": max(10, int(px_per_mm * 0.030)), "maxR": max(28, int(px_per_mm * 0.080)), "minDist": max(8, int(px_per_mm * 0.020)), "param2": 7},
-            {"minR": max(22, int(px_per_mm * 0.070)), "maxR": max(80, int(px_per_mm * 0.220)), "minDist": max(12, int(px_per_mm * 0.040)), "param2": 9},
+            {"minR": max(4, int(px_per_mm * 0.010)), "maxR": max(12, int(px_per_mm * 0.035)), "minDist": max(6, int(px_per_mm * 0.012)), "param2": 7},
+            {"minR": max(10, int(px_per_mm * 0.030)), "maxR": max(28, int(px_per_mm * 0.080)), "minDist": max(9, int(px_per_mm * 0.020)), "param2": 8},
+            {"minR": max(22, int(px_per_mm * 0.070)), "maxR": max(80, int(px_per_mm * 0.220)), "minDist": max(14, int(px_per_mm * 0.040)), "param2": 10},
         ]
     else:
         faixas = [
-            {"minR": 3, "maxR": 7, "minDist": 4, "param2": 5},
-            {"minR": 6, "maxR": 13, "minDist": 6, "param2": 6},
-            {"minR": 10, "maxR": 28, "minDist": 8, "param2": 7},
-            {"minR": 22, "maxR": 80, "minDist": 12, "param2": 9},
+            {"minR": 4, "maxR": 12, "minDist": 6, "param2": 7},
+            {"minR": 10, "maxR": 28, "minDist": 9, "param2": 8},
+            {"minR": 22, "maxR": 80, "minDist": 14, "param2": 10},
         ]
 
     for base in bases:
@@ -320,9 +274,9 @@ def detectar_bolhas_multiescala(
             circles = cv2.HoughCircles(
                 base,
                 cv2.HOUGH_GRADIENT,
-                dp=1.05,
+                dp=1.15,
                 minDist=faixa["minDist"],
-                param1=80,
+                param1=85,
                 param2=faixa["param2"],
                 minRadius=faixa["minR"],
                 maxRadius=faixa["maxR"],
@@ -339,8 +293,7 @@ def detectar_bolhas_multiescala(
                 if not ponto_totalmente_dentro_roi(x, y, r, roi_info):
                     continue
 
-                score = score_circulo_anel(ref_score, x, y, r)
-
+                score = score_circulo_rapido(ref_score, x, y, r)
                 if score < 0.8:
                     continue
 
@@ -353,7 +306,7 @@ def detectar_bolhas_multiescala(
                     }
                 )
 
-    bolhas = fundir_candidatos(candidatos)
+    bolhas = fundir_candidatos_rapido(candidatos)
 
     if len(bolhas) > 0:
         scores = np.array([b["score"] for b in bolhas], dtype=float)
