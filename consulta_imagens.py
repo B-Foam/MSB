@@ -88,13 +88,7 @@ def detectar_barra_escala_px(img_bgr):
         cv2.LINE_AA
     )
 
-    barra_info = {
-        "x": gx,
-        "y": gy,
-        "w": ww,
-        "h": hh
-    }
-
+    barra_info = {"x": gx, "y": gy, "w": ww, "h": hh}
     return ww, img_annot, barra_info
 
 
@@ -105,10 +99,10 @@ def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    # Faixa superior: apenas a linha de texto
+    # topo com texto
     mask[0:int(h * 0.035), :] = 255
 
-    # Região da barra de escala: pequena e dinâmica
+    # região pequena da barra
     if barra_info is not None:
         x = barra_info["x"]
         y = barra_info["y"]
@@ -147,12 +141,10 @@ def gerar_imagens_base(img_bgr, mask_exclusao, clip_limit, bilateral_d, sigma_co
         sigmaSpace=sigma_space
     )
 
-    # versões para visualização
     gray_vis = gray_full.copy()
     clahe_vis = clahe_full.copy()
     bilateral_vis = bilateral_full.copy()
 
-    # versões para processamento
     gray_proc = aplicar_mascara_exclusao(gray_full, mask_exclusao, valor=255)
     clahe_proc = aplicar_mascara_exclusao(clahe_full, mask_exclusao, valor=255)
     bilateral_proc = aplicar_mascara_exclusao(bilateral_full, mask_exclusao, valor=255)
@@ -197,9 +189,9 @@ def binarizar_gradiente(grad, mask_exclusao, block_size, c_value, open_iter, clo
 
 
 # ============================================================
-# CONTORNOS
+# CANDIDATOS CIRCULARES
 # ============================================================
-def extrair_contornos_candidatos(
+def extrair_candidatos_circulares(
     mask,
     area_min,
     area_max,
@@ -254,13 +246,13 @@ def extrair_contornos_candidatos(
             "bbox": (x, y, w, h),
             "cx": float(cx),
             "cy": float(cy),
-            "r": float(r)
+            "r": float(r),
         })
 
     return candidatos
 
 
-def filtrar_borda_contornos(candidatos, shape):
+def filtrar_borda_candidatos(candidatos, shape):
     h, w = shape[:2]
     finais = []
 
@@ -273,7 +265,7 @@ def filtrar_borda_contornos(candidatos, shape):
     return finais
 
 
-def agrupar_por_proximidade(candidatos, fator_dist=1.2):
+def agrupar_por_proximidade(candidatos, fator_dist=1.0):
     grupos = []
     usados = [False] * len(candidatos)
 
@@ -306,17 +298,17 @@ def agrupar_por_proximidade(candidatos, fator_dist=1.2):
     return grupos
 
 
-def escolher_contorno_dominante(grupo):
+def escolher_candidato_dominante(grupo):
     melhor = None
     melhor_score = -1e9
 
     for c in grupo:
         score = (
-            3.0 * c["circularidade"] +
+            2.5 * c["circularidade"] +
             2.0 * c["solidez"] +
-            0.0005 * c["area"]
+            0.0010 * c["area"] +
+            0.02 * c["r"]
         )
-
         if score > melhor_score:
             melhor_score = score
             melhor = c
@@ -324,30 +316,35 @@ def escolher_contorno_dominante(grupo):
     return melhor
 
 
-def manter_contornos_dominantes(candidatos, fator_dist):
+def manter_candidatos_dominantes(candidatos, fator_dist):
     if not candidatos:
         return []
 
     grupos = agrupar_por_proximidade(candidatos, fator_dist=fator_dist)
-    finais = [escolher_contorno_dominante(g) for g in grupos if len(g) > 0]
+    finais = [escolher_candidato_dominante(g) for g in grupos if len(g) > 0]
     return finais
 
 
-def desenhar_contornos_coloridos(img_bgr, candidatos, mostrar_id=False):
+# ============================================================
+# DESENHO
+# ============================================================
+def desenhar_circulos_coloridos(img_bgr, candidatos, mostrar_id=False):
     out = img_bgr.copy()
     rng = np.random.default_rng(42)
 
     for i, c in enumerate(candidatos, start=1):
-        cnt = c["contorno"]
         color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        cv2.drawContours(out, [cnt], -1, color, 2)
+        cx = int(round(c["cx"]))
+        cy = int(round(c["cy"]))
+        r = int(round(c["r"]))
+
+        cv2.circle(out, (cx, cy), r, color, 2)
 
         if mostrar_id:
-            x, y, w, h = c["bbox"]
             cv2.putText(
                 out,
                 str(i),
-                (x, max(15, y - 3)),
+                (cx + 3, cy - 3),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.4,
                 color,
@@ -357,7 +354,7 @@ def desenhar_contornos_coloridos(img_bgr, candidatos, mostrar_id=False):
 
     cv2.putText(
         out,
-        f"Contornos finais: {len(candidatos)}",
+        f"Candidatos dominantes: {len(candidatos)}",
         (20, 35),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -372,7 +369,7 @@ def desenhar_contornos_coloridos(img_bgr, candidatos, mostrar_id=False):
 def montar_resumo(candidatos):
     if not candidatos:
         return pd.DataFrame([{
-            "Contornos finais": 0,
+            "Candidatos dominantes": 0,
             "Area media": 0.0,
             "Circularidade media": 0.0,
             "Solidez media": 0.0,
@@ -385,7 +382,7 @@ def montar_resumo(candidatos):
     raios = [c["r"] for c in candidatos]
 
     return pd.DataFrame([{
-        "Contornos finais": len(candidatos),
+        "Candidatos dominantes": len(candidatos),
         "Area media": round(float(np.mean(areas)), 2),
         "Circularidade media": round(float(np.mean(circs)), 4),
         "Solidez media": round(float(np.mean(sols)), 4),
@@ -404,14 +401,12 @@ def render_consulta_imagens(
     with st.container(border=True):
         if st.button("Atualizar lista", key="btn_atualizar_lista_consulta"):
             imagens, erro = listar_imagens_supabase("")
-
             if erro:
                 st.error(f"Erro: {erro}")
             else:
                 session_state.lista_imagens_consulta = [img["name"] for img in imagens]
 
         lista = session_state.get("lista_imagens_consulta", [])
-
         if not lista:
             st.info("Clique em 'Atualizar lista' para carregar as imagens.")
             return
@@ -438,44 +433,43 @@ def render_consulta_imagens(
             sigma_space = st.slider("Bilateral - sigma espaço", 10, 150, 75, 5)
         with c3:
             kernel_grad = st.slider("Gradiente morfológico - kernel", 3, 21, 5, 2)
-            block_size = st.slider("Threshold adaptativo - bloco", 11, 151, 51, 2)
+            block_size = st.slider("Threshold adaptativo - bloco", 11, 151, 41, 2)
 
-        st.markdown("## Configurações dos contornos")
+        st.markdown("## Configurações dos candidatos")
 
         c4, c5, c6 = st.columns(3)
         with c4:
-            c_value = st.slider("Threshold adaptativo - C", 0, 15, 3, 1)
-            open_iter = st.slider("Abertura morfológica", 0, 3, 1, 1)
+            c_value = st.slider("Threshold adaptativo - C", 0, 15, 2, 1)
+            open_iter = st.slider("Abertura morfológica", 0, 3, 0, 1)
         with c5:
             close_iter = st.slider("Fechamento morfológico", 0, 3, 1, 1)
-            area_min = st.slider("Área mínima do contorno (px²)", 5, 5000, 80, 5)
+            area_min = st.slider("Área mínima (px²)", 5, 5000, 20, 5)
         with c6:
-            area_max = st.slider("Área máxima do contorno (px²)", 100, 50000, 4000, 50)
-            circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.40, 0.01)
+            area_max = st.slider("Área máxima (px²)", 100, 50000, 12000, 50)
+            circularidade_min = st.slider("Circularidade mínima", 0.05, 1.00, 0.15, 0.01)
 
         c7, c8, c9, c10 = st.columns(4)
         with c7:
-            solidez_min = st.slider("Solidez mínima", 0.10, 1.00, 0.75, 0.01)
+            solidez_min = st.slider("Solidez mínima", 0.10, 1.00, 0.40, 0.01)
         with c8:
-            raio_min = st.slider("Raio mínimo (px)", 2, 80, 6, 1)
+            raio_min = st.slider("Raio mínimo (px)", 2, 80, 4, 1)
         with c9:
-            raio_max = st.slider("Raio máximo (px)", 10, 300, 80, 1)
+            raio_max = st.slider("Raio máximo (px)", 10, 300, 120, 1)
         with c10:
-            aspect_tol = st.slider("Tolerância largura/altura", 1.0, 3.0, 1.8, 0.1)
+            aspect_tol = st.slider("Tolerância largura/altura", 1.0, 3.0, 2.4, 0.1)
 
         fator_dist = st.slider(
             "Agrupamento por proximidade",
-            0.5, 2.5, 1.2, 0.1,
-            help="Valores maiores agrupam mais contornos vizinhos e tendem a manter só um dominante por bolha."
+            0.5, 2.5, 0.85, 0.05,
+            help="Valores menores agrupam menos e preservam mais círculos."
         )
 
-        mostrar_id = st.checkbox("Mostrar índice das bolhas", value=False)
+        mostrar_id = st.checkbox("Mostrar índice dos candidatos", value=False)
 
         try:
             img_original_pil = baixar_imagem(url_imagem)
             img_original_bgr = pil_to_cv(img_original_pil)
 
-            # calibração
             barra_px_auto, img_calibracao, barra_info = detectar_barra_escala_px(img_original_bgr)
 
             st.markdown("## Calibração")
@@ -487,13 +481,11 @@ def render_consulta_imagens(
             st.image(
                 cv_to_pil(img_calibracao),
                 caption="Imagem de calibração com a barra de 1,0 mm marcada em verde",
-                use_container_width=True
+                width=520
             )
 
-            # máscara fixa
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape, barra_info)
 
-            # imagens base
             gray_vis, clahe_vis, bilateral_vis, gray_proc, clahe_proc, bilateral_proc = gerar_imagens_base(
                 img_original_bgr,
                 mask_exclusao,
@@ -503,7 +495,6 @@ def render_consulta_imagens(
                 sigma_space
             )
 
-            # gradiente e máscara
             grad_vis = gerar_gradiente_morfologico(bilateral_vis, kernel_grad)
             grad_proc = gerar_gradiente_morfologico(bilateral_proc, kernel_grad)
 
@@ -516,8 +507,7 @@ def render_consulta_imagens(
                 close_iter
             )
 
-            # contornos
-            contornos_brutos = extrair_contornos_candidatos(
+            candidatos_brutos = extrair_candidatos_circulares(
                 mask_grad,
                 area_min=area_min,
                 area_max=area_max,
@@ -528,19 +518,19 @@ def render_consulta_imagens(
                 aspect_tol=aspect_tol
             )
 
-            contornos_sem_borda = filtrar_borda_contornos(
-                contornos_brutos,
+            candidatos_sem_borda = filtrar_borda_candidatos(
+                candidatos_brutos,
                 img_original_bgr.shape
             )
 
-            contornos_finais = manter_contornos_dominantes(
-                contornos_sem_borda,
+            candidatos_finais = manter_candidatos_dominantes(
+                candidatos_sem_borda,
                 fator_dist=fator_dist
             )
 
-            img_contornos = desenhar_contornos_coloridos(
+            img_candidatos = desenhar_circulos_coloridos(
                 img_original_bgr,
-                contornos_finais,
+                candidatos_finais,
                 mostrar_id=mostrar_id
             )
 
@@ -549,39 +539,38 @@ def render_consulta_imagens(
             p1, p2, p3 = st.columns(3)
             with p1:
                 st.caption("Imagem original")
-                st.image(img_original_pil, use_container_width=True)
+                st.image(img_original_pil, width=270)
             with p2:
                 st.caption("CLAHE")
-                st.image(clahe_vis, use_container_width=True)
+                st.image(clahe_vis, width=270)
             with p3:
                 st.caption("Filtro bilateral")
-                st.image(bilateral_vis, use_container_width=True)
+                st.image(bilateral_vis, width=270)
 
             st.markdown("## Diagnóstico do gradiente")
 
             p4, p5 = st.columns(2)
             with p4:
                 st.caption("Gradiente morfológico")
-                st.image(grad_vis, use_container_width=True)
+                st.image(grad_vis, width=420)
             with p5:
                 st.caption("Máscara do gradiente")
-                st.image(mask_grad, use_container_width=True)
+                st.image(mask_grad, width=420)
 
-            st.markdown("## Contornos dominantes sobre a imagem original")
-            st.image(cv_to_pil(img_contornos), use_container_width=True)
+            st.markdown("## Círculos dominantes sobre a imagem original")
+            st.image(cv_to_pil(img_candidatos), width=760)
 
             st.markdown("## Diagnóstico")
             d1, d2, d3 = st.columns(3)
-            d1.metric("Contornos brutos", len(contornos_brutos))
-            d2.metric("Após remover borda", len(contornos_sem_borda))
-            d3.metric("Contornos dominantes", len(contornos_finais))
+            d1.metric("Candidatos brutos", len(candidatos_brutos))
+            d2.metric("Após remover borda", len(candidatos_sem_borda))
+            d3.metric("Candidatos dominantes", len(candidatos_finais))
 
             st.markdown("## Resumo")
-            st.dataframe(montar_resumo(contornos_finais), use_container_width=True)
+            st.dataframe(montar_resumo(candidatos_finais), use_container_width=True)
 
             st.info(
-                "Objetivo desta etapa: manter apenas um contorno dominante por bolha, "
-                "reduzindo contornos internos e fragmentados antes de avançar para a medição."
+                "Objetivo desta etapa: trocar pequenos fragmentos por círculos dominantes mais fáceis de interpretar visualmente."
             )
 
         except Exception as e:
