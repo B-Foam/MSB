@@ -118,37 +118,33 @@ def aplicar_mascara_exclusao(img_gray, mask_exclusao):
 # PRÉ-PROCESSAMENTO
 # ============================================================
 def preprocessar_imagem(img_bgr, mask_exclusao):
-    """
-    Pipeline principal de pré-processamento:
-    1) escala de cinza
-    2) filtro mediano
-    3) black-hat para corrigir fundo
-    4) threshold adaptativo
-    5) fechamento morfológico
-    """
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    # máscara fixa
     gray_mask = aplicar_mascara_exclusao(gray, mask_exclusao)
 
-    # suavização robusta contra ruído/reflexos finos
-    med = cv2.medianBlur(gray_mask, 5)
+    # 1) Bilateral: reduz textura interna preservando bordas
+    smooth = cv2.bilateralFilter(gray_mask, 9, 75, 75)
 
-    # black-hat: destaca regiões escuras/contornos sobre fundo claro
-    kernel_bh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
-    blackhat = cv2.morphologyEx(med, cv2.MORPH_BLACKHAT, kernel_bh)
+    # 2) Top-hat: ajuda a uniformizar fundo / realçar detalhes claros locais
+    kernel_th = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
+    tophat = cv2.morphologyEx(smooth, cv2.MORPH_TOPHAT, kernel_th)
 
-    # normalização
-    blackhat = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+    # 3) Black-hat menor: ajuda a destacar bordas escuras sem exagerar
+    kernel_bh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    blackhat = cv2.morphologyEx(smooth, cv2.MORPH_BLACKHAT, kernel_bh)
 
-    # threshold adaptativo
+    # 4) Combinação
+    final_gray = cv2.add(smooth, tophat)
+    final_gray = cv2.subtract(final_gray, blackhat)
+    final_gray = cv2.normalize(final_gray, None, 0, 255, cv2.NORM_MINMAX)
+
+    # 5) Threshold adaptativo mais suave
     th = cv2.adaptiveThreshold(
-        blackhat,
+        final_gray,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
-        41,
-        -2
+        101,
+        5
     )
 
     # inverter para trabalhar com objetos brancos
@@ -157,29 +153,21 @@ def preprocessar_imagem(img_bgr, mask_exclusao):
     # remover regiões excluídas
     th_inv[mask_exclusao == 255] = 0
 
-    # fechamento para fechar pequenas falhas
+    # fechamento morfológico
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     closed = cv2.morphologyEx(th_inv, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
-    # abertura leve para limpar ruído
+    # abertura leve
     kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
-    return gray, med, blackhat, th_inv, opened
+    return gray, smooth, tophat, blackhat, final_gray, th_inv, opened
 
 
 # ============================================================
 # WATERSHED
 # ============================================================
 def segmentar_por_watershed(bin_img):
-    """
-    Recebe máscara binária com objetos brancos.
-    Retorna:
-    - markers
-    - mapa de distância normalizado
-    - sure_fg
-    - sure_bg
-    """
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
     sure_bg = cv2.dilate(bin_img, kernel, iterations=2)
@@ -196,7 +184,6 @@ def segmentar_por_watershed(bin_img):
     markers = markers + 1
     markers[unknown == 255] = 0
 
-    # watershed precisa de imagem 3 canais
     img_color = cv2.cvtColor(bin_img, cv2.COLOR_GRAY2BGR)
     markers = cv2.watershed(img_color, markers)
 
@@ -355,9 +342,6 @@ def desenhar_bolhas(img_bgr, bolhas, px_per_mm):
 
 
 def desenhar_segmentacao(markers):
-    """
-    Cria uma imagem colorida dos labels do watershed.
-    """
     labels = markers.copy()
     labels[labels < 0] = 0
 
@@ -367,8 +351,6 @@ def desenhar_segmentacao(markers):
 
     norm = (labels.astype(np.float32) / max_label * 255).astype(np.uint8)
     color = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
-
-    # bordas do watershed em branco
     color[markers == -1] = [255, 255, 255]
     return color
 
@@ -383,7 +365,6 @@ def montar_dataframe_medidas(bolhas, px_per_mm):
         raio_px = b["r"]
         diam_um = (2 * raio_px / px_per_mm) * 1000.0
         raio_um = (raio_px / px_per_mm) * 1000.0
-
         area_um2 = (b["area_px"] / (px_per_mm ** 2)) * 1_000_000
 
         dados.append({
@@ -471,46 +452,38 @@ def render_consulta_imagens(
         with col1:
             raio_minimo = st.slider(
                 "Raio mínimo da bolha (px)",
-                4, 80, 6, 1,
-                help="Ignora bolhas muito pequenas abaixo deste valor."
+                4, 80, 6, 1
             )
             raio_maximo = st.slider(
                 "Raio máximo da bolha (px)",
-                20, 300, 90, 1,
-                help="Evita regiões muito grandes e imprecisas."
+                20, 300, 90, 1
             )
 
         with col2:
             circularidade_min = st.slider(
                 "Circularidade mínima",
-                0.10, 1.00, 0.35, 0.01,
-                help="Quanto mais alto, mais circular a bolha precisa ser."
+                0.10, 1.00, 0.35, 0.01
             )
             solidez_min = st.slider(
                 "Solidez mínima",
-                0.10, 1.00, 0.70, 0.01,
-                help="Ajuda a eliminar regiões irregulares ou junções mal separadas."
+                0.10, 1.00, 0.70, 0.01
             )
 
         with col3:
             area_min_px = st.slider(
                 "Área mínima da bolha (px²)",
-                10, 5000, 80, 10,
-                help="Remove regiões muito pequenas."
+                10, 5000, 80, 10
             )
             area_max_px = st.slider(
                 "Área máxima da bolha (px²)",
-                100, 100000, 12000, 100,
-                help="Remove regiões grandes demais."
+                100, 100000, 12000, 100
             )
 
         try:
             img_original_pil = baixar_imagem(url_imagem)
             img_original_bgr = pil_to_cv(img_original_pil)
 
-            # --------------------------------------------------
-            # CALIBRAÇÃO
-            # --------------------------------------------------
+            # Calibração
             barra_px_auto, img_calibracao = detectar_barra_escala_px(img_original_bgr)
 
             st.markdown("## Calibração")
@@ -538,12 +511,10 @@ def render_consulta_imagens(
                 use_container_width=True
             )
 
-            # --------------------------------------------------
-            # PRÉ-PROCESSAMENTO
-            # --------------------------------------------------
+            # Pré-processamento
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape)
 
-            gray, med, blackhat, th_inv, opened = preprocessar_imagem(
+            gray, smooth, tophat, blackhat, final_gray, th_inv, opened = preprocessar_imagem(
                 img_original_bgr,
                 mask_exclusao
             )
@@ -555,23 +526,26 @@ def render_consulta_imagens(
                 st.caption("Imagem original")
                 st.image(img_original_pil, use_container_width=True)
             with p2:
-                st.caption("Filtro mediano")
-                st.image(med, use_container_width=True)
+                st.caption("Filtro bilateral")
+                st.image(smooth, use_container_width=True)
             with p3:
-                st.caption("Black-hat / correção de fundo")
-                st.image(blackhat, use_container_width=True)
+                st.caption("Top-Hat")
+                st.image(tophat, use_container_width=True)
 
-            p4, p5 = st.columns(2)
+            p4, p5, p6 = st.columns(3)
             with p4:
+                st.caption("Black-Hat")
+                st.image(blackhat, use_container_width=True)
+            with p5:
+                st.caption("Imagem combinada")
+                st.image(final_gray, use_container_width=True)
+            with p6:
                 st.caption("Threshold adaptativo")
                 st.image(th_inv, use_container_width=True)
-            with p5:
-                st.caption("Máscara final para segmentação")
-                st.image(opened, use_container_width=True)
 
-            # --------------------------------------------------
-            # WATERSHED
-            # --------------------------------------------------
+            st.image(opened, caption="Máscara final para segmentação", use_container_width=True)
+
+            # Watershed
             markers, dist_norm, sure_fg, sure_bg = segmentar_por_watershed(opened)
             img_segmentacao = desenhar_segmentacao(markers)
 
@@ -587,9 +561,7 @@ def render_consulta_imagens(
                 st.caption("Watershed")
                 st.image(cv_to_pil(img_segmentacao), use_container_width=True)
 
-            # --------------------------------------------------
-            # EXTRAÇÃO / FILTRO DE BOLHAS
-            # --------------------------------------------------
+            # Extração / filtro
             bolhas_brutas = extrair_bolhas_dos_markers(markers, raio_minimo, raio_maximo)
             bolhas_filtradas = filtrar_bolhas_segmentadas(
                 bolhas_brutas,
@@ -611,9 +583,7 @@ def render_consulta_imagens(
                 st.warning("Nenhuma bolha foi detectada com os parâmetros atuais.")
                 return
 
-            # --------------------------------------------------
-            # RESULTADOS
-            # --------------------------------------------------
+            # Resultados
             df = montar_dataframe_medidas(bolhas_filtradas, px_per_mm)
 
             total_bolhas = len(df)
