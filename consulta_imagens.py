@@ -144,10 +144,8 @@ def criar_mascara_roi(shape, roi_info: Dict[str, Any], barra_info=None):
 
     cv2.circle(mask, (int(roi_info["cx"]), int(roi_info["cy"])), int(roi_info["r"]), 255, -1)
 
-    # excluir cabeçalho superior
     mask[0:int(h * 0.035), :] = 0
 
-    # excluir barra de escala
     if barra_info is not None:
         x = barra_info["x"]
         y = barra_info["y"]
@@ -204,38 +202,136 @@ def preprocessar_para_candidatos(img_bgr: np.ndarray, mask_roi: np.ndarray):
 
 
 # ============================================================
+# AGRUPAMENTO MAIS TOLERANTE
+# ============================================================
+def agrupar_candidatos_semelhantes(circles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not circles:
+        return []
+
+    grupos = []
+
+    for c in circles:
+        x, y, r = c["x"], c["y"], c["r"]
+        encaixou = False
+
+        for g in grupos:
+            dist = math.hypot(x - g["x"], y - g["y"])
+            limite_dist = max(4.0, 0.45 * (r + g["r"]))
+            limite_raio = max(3.0, 0.45 * max(r, g["r"]))
+
+            if dist <= limite_dist and abs(r - g["r"]) <= limite_raio:
+                g["xs"].append(x)
+                g["ys"].append(y)
+                g["rs"].append(r)
+                g["count"] += 1
+                encaixou = True
+                break
+
+        if not encaixou:
+            grupos.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "r": r,
+                    "xs": [x],
+                    "ys": [y],
+                    "rs": [r],
+                    "count": 1,
+                    "ativo": True,
+                }
+            )
+
+    finais = []
+    for g in grupos:
+        finais.append(
+            {
+                "x": float(np.mean(g["xs"])),
+                "y": float(np.mean(g["ys"])),
+                "r": float(np.mean(g["rs"])),
+                "ativo": True,
+            }
+        )
+
+    return finais
+
+
+# ============================================================
 # CANDIDATOS INICIAIS
 # ============================================================
 def gerar_candidatos_iniciais(
-    img_proc: np.ndarray,
+    prep: Dict[str, np.ndarray],
     roi_info: Dict[str, Any],
     px_per_mm: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     candidatos = []
 
+    roi_clahe = prep["roi_clahe"]
+    roi_sharpen = prep["roi_sharpen"]
+
+    canny = cv2.Canny(roi_sharpen, 40, 120)
+    canny = cv2.GaussianBlur(canny, (3, 3), 0)
+
+    imagens_base = [
+        ("clahe", roi_clahe),
+        ("sharpen", roi_sharpen),
+        ("canny", canny),
+    ]
+
     if px_per_mm and px_per_mm > 0:
-        min_r = max(4, int(px_per_mm * 0.010))
-        max_r = max(12, int(px_per_mm * 0.18))
+        faixas = [
+            {
+                "nome": "pequenas",
+                "minRadius": max(3, int(px_per_mm * 0.004)),
+                "maxRadius": max(8, int(px_per_mm * 0.018)),
+                "minDist": max(5, int(px_per_mm * 0.010)),
+                "param2": 10,
+            },
+            {
+                "nome": "medias",
+                "minRadius": max(7, int(px_per_mm * 0.015)),
+                "maxRadius": max(18, int(px_per_mm * 0.045)),
+                "minDist": max(8, int(px_per_mm * 0.018)),
+                "param2": 12,
+            },
+            {
+                "nome": "grandes",
+                "minRadius": max(16, int(px_per_mm * 0.040)),
+                "maxRadius": max(55, int(px_per_mm * 0.140)),
+                "minDist": max(14, int(px_per_mm * 0.030)),
+                "param2": 14,
+            },
+        ]
     else:
-        min_r = 4
-        max_r = 60
+        faixas = [
+            {"nome": "pequenas", "minRadius": 3, "maxRadius": 10, "minDist": 6, "param2": 10},
+            {"nome": "medias",   "minRadius": 8, "maxRadius": 22, "minDist": 9, "param2": 12},
+            {"nome": "grandes",  "minRadius": 18, "maxRadius": 60, "minDist": 16, "param2": 14},
+        ]
 
-    circles = cv2.HoughCircles(
-        img_proc,
-        cv2.HOUGH_GRADIENT,
-        dp=1.15,
-        minDist=max(8, min_r * 2),
-        param1=100,
-        param2=16,
-        minRadius=min_r,
-        maxRadius=max_r
-    )
+    for _, img in imagens_base:
+        for faixa in faixas:
+            circles = cv2.HoughCircles(
+                img,
+                cv2.HOUGH_GRADIENT,
+                dp=1.15,
+                minDist=faixa["minDist"],
+                param1=100,
+                param2=faixa["param2"],
+                minRadius=faixa["minRadius"],
+                maxRadius=faixa["maxRadius"],
+            )
 
-    if circles is not None:
-        circles = np.round(circles[0, :]).astype(int)
-        for c in circles:
-            x, y, r = int(c[0]), int(c[1]), int(c[2])
-            if ponto_dentro_roi(x, y, roi_info, folga=r + 2):
+            if circles is None:
+                continue
+
+            circles = np.round(circles[0, :]).astype(int)
+
+            for c in circles:
+                x, y, r = int(c[0]), int(c[1]), int(c[2])
+
+                if not ponto_dentro_roi(x, y, roi_info, folga=max(1, int(0.7 * r))):
+                    continue
+
                 candidatos.append(
                     {
                         "x": float(x),
@@ -245,25 +341,7 @@ def gerar_candidatos_iniciais(
                     }
                 )
 
-    return remover_duplicados(candidatos)
-
-
-def remover_duplicados(circles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not circles:
-        return []
-
-    finais = []
-    for c in circles:
-        manter = True
-        for f in finais:
-            dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
-            r_ref = max(c["r"], f["r"])
-            if dist <= 0.8 * r_ref and abs(c["r"] - f["r"]) <= 0.6 * r_ref:
-                manter = False
-                break
-        if manter:
-            finais.append(c)
-    return finais
+    return agrupar_candidatos_semelhantes(candidatos)
 
 
 # ============================================================
@@ -298,7 +376,7 @@ def dataframe_to_circles(df: pd.DataFrame, roi_info: Dict[str, Any]) -> List[Dic
             "r": r,
         })
 
-    return remover_duplicados(circles)
+    return agrupar_candidatos_semelhantes(circles)
 
 
 # ============================================================
@@ -330,7 +408,7 @@ def desenhar_roi_e_circulos(
     rng = np.random.default_rng(42)
     count_ativos = 0
 
-    for i, c in enumerate(circles, start=1):
+    for c in circles:
         if not c.get("ativo", True):
             continue
 
@@ -463,7 +541,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             roi_info = criar_roi_circular_padrao(img_bgr.shape, raio_frac=0.43)
             salvar_roi(session_state, escolhido, roi_info)
 
-        # ---------------- ROI ----------------
         st.markdown("## Área útil circular")
 
         r1, r2, r3 = st.columns(3)
@@ -489,7 +566,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         st.image(cv_to_pil(img_roi_preview), caption="Pré-visualização da ROI circular", width=760)
 
-        # ---------------- calibração ----------------
         st.markdown("## Calibração")
         if px_per_mm:
             st.success(f"Barra detectada: {px_per_mm:.2f} px para 1,0 mm")
@@ -498,13 +574,12 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         st.image(cv_to_pil(img_calibracao), caption="Detecção da barra de escala", width=420)
 
-        # ---------------- candidatos iniciais ----------------
         st.markdown("## Candidatos iniciais")
 
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Gerar candidatos iniciais", key="btn_gerar_candidatos"):
-                candidatos = gerar_candidatos_iniciais(prep["roi_sharpen"], roi_info, px_per_mm)
+                candidatos = gerar_candidatos_iniciais(prep, roi_info, px_per_mm)
                 salvar_circulos(session_state, escolhido, candidatos)
                 st.success(f"{len(candidatos)} candidatos gerados.")
                 st.rerun()
@@ -517,7 +592,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         circles = obter_circulos(session_state, escolhido)
 
-        # ---------------- adicionar manualmente ----------------
         st.markdown("## Adicionar bolha manualmente")
         a1, a2, a3, a4 = st.columns(4)
         with a1:
@@ -532,14 +606,13 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             if st.button("Adicionar círculo", key="btn_add_circle"):
                 if ponto_dentro_roi(novo_x, novo_y, roi_info, folga=novo_r + 1):
                     circles.append({"ativo": True, "x": novo_x, "y": novo_y, "r": novo_r})
-                    circles = remover_duplicados(circles)
+                    circles = agrupar_candidatos_semelhantes(circles)
                     salvar_circulos(session_state, escolhido, circles)
                     st.success("Círculo adicionado.")
                     st.rerun()
                 else:
                     st.warning("O círculo precisa ficar totalmente dentro da ROI.")
 
-        # ---------------- edição por tabela ----------------
         st.markdown("## Editar / remover círculos")
         df_edit = circles_to_dataframe(circles)
 
@@ -558,7 +631,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         circles = obter_circulos(session_state, escolhido)
 
-        # ---------------- imagem final ----------------
         st.markdown("## Resultado final")
         img_resultado = desenhar_roi_e_circulos(
             img_bgr,
@@ -568,7 +640,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         )
         st.image(cv_to_pil(img_resultado), width=900)
 
-        # ---------------- medidas ----------------
         df_med = montar_dataframe_medidas(circles, px_per_mm)
 
         if df_med.empty:
