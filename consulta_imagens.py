@@ -1,4 +1,5 @@
 import io
+import math
 import requests
 import streamlit as st
 import numpy as np
@@ -11,17 +12,17 @@ import matplotlib.pyplot as plt
 # ============================================================
 # FUNÇÕES BÁSICAS
 # ============================================================
-def baixar_imagem(url):
+def baixar_imagem(url: str) -> Image.Image:
     response = requests.get(url, timeout=30)
     response.raise_for_status()
     return Image.open(io.BytesIO(response.content)).convert("RGB")
 
 
-def pil_to_cv(img_pil):
+def pil_to_cv(img_pil: Image.Image) -> np.ndarray:
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def cv_to_pil(img_cv):
+def cv_to_pil(img_cv: np.ndarray) -> Image.Image:
     if len(img_cv.shape) == 2:
         return Image.fromarray(img_cv)
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
@@ -30,7 +31,7 @@ def cv_to_pil(img_cv):
 # ============================================================
 # CALIBRAÇÃO DA BARRA DE 1,0 mm
 # ============================================================
-def detectar_barra_escala_px(img_bgr):
+def detectar_barra_escala_px(img_bgr: np.ndarray):
     img_annot = img_bgr.copy()
     h, w = img_bgr.shape[:2]
 
@@ -93,13 +94,13 @@ def detectar_barra_escala_px(img_bgr):
 
 
 # ============================================================
-# MÁSCARAS FIXAS
+# REGIÕES EXCLUÍDAS
 # ============================================================
 def criar_mascara_regioes_excluidas(shape, barra_info=None):
     h, w = shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    # topo com texto
+    # faixa superior com texto
     mask[0:int(h * 0.035), :] = 255
 
     # régua
@@ -119,19 +120,19 @@ def criar_mascara_regioes_excluidas(shape, barra_info=None):
     return mask
 
 
-def aplicar_mascara_exclusao(img_gray, mask_exclusao, valor=255):
+def aplicar_mascara_exclusao(img_gray: np.ndarray, mask_exclusao: np.ndarray, valor: int = 255):
     out = img_gray.copy()
     out[mask_exclusao == 255] = valor
     return out
 
 
 # ============================================================
-# PRÉ-PROCESSAMENTO BASE
+# PRÉ-PROCESSAMENTO
 # ============================================================
-def gerar_imagens_base(img_bgr, mask_exclusao):
+def preprocessar_base(img_bgr: np.ndarray, mask_exclusao: np.ndarray):
     gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
     clahe_full = clahe.apply(gray_full)
 
     bilateral_full = cv2.bilateralFilter(
@@ -141,326 +142,343 @@ def gerar_imagens_base(img_bgr, mask_exclusao):
         sigmaSpace=75
     )
 
+    # realce suave
+    blur_light = cv2.GaussianBlur(bilateral_full, (0, 0), 1.0)
+    realcado = cv2.addWeighted(bilateral_full, 1.35, blur_light, -0.35, 0)
+
+    # gradiente da imagem para validação radial
+    gx = cv2.Sobel(realcado, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(realcado, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = cv2.magnitude(gx, gy)
+    grad_mag = cv2.normalize(grad_mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # versões para visualização
     gray_vis = gray_full.copy()
     clahe_vis = clahe_full.copy()
     bilateral_vis = bilateral_full.copy()
+    realcado_vis = realcado.copy()
+    grad_vis = grad_mag.copy()
 
+    # versões para processamento
+    gray_proc = aplicar_mascara_exclusao(gray_full, mask_exclusao, valor=255)
+    clahe_proc = aplicar_mascara_exclusao(clahe_full, mask_exclusao, valor=255)
     bilateral_proc = aplicar_mascara_exclusao(bilateral_full, mask_exclusao, valor=255)
-
-    return gray_vis, clahe_vis, bilateral_vis, bilateral_proc
-
-
-# ============================================================
-# MÁSCARAS CANDIDATAS
-# ============================================================
-def gerar_mascaras_candidatas(img_gray, mask_exclusao):
-    masks = {}
-
-    # Otsu
-    _, otsu = cv2.threshold(
-        img_gray,
-        0,
-        255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
-    otsu[mask_exclusao == 255] = 0
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    otsu = cv2.morphologyEx(otsu, cv2.MORPH_OPEN, kernel, iterations=1)
-    otsu = cv2.morphologyEx(otsu, cv2.MORPH_CLOSE, kernel, iterations=1)
-    masks["Otsu"] = otsu
-
-    # Adaptive 31
-    ad31 = cv2.adaptiveThreshold(
-        img_gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        31,
-        2
-    )
-    ad31[mask_exclusao == 255] = 0
-    ad31 = cv2.morphologyEx(ad31, cv2.MORPH_OPEN, kernel, iterations=1)
-    ad31 = cv2.morphologyEx(ad31, cv2.MORPH_CLOSE, kernel, iterations=1)
-    masks["Adaptativo 31"] = ad31
-
-    # Adaptive 51
-    ad51 = cv2.adaptiveThreshold(
-        img_gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        51,
-        3
-    )
-    ad51[mask_exclusao == 255] = 0
-    ad51 = cv2.morphologyEx(ad51, cv2.MORPH_OPEN, kernel, iterations=1)
-    ad51 = cv2.morphologyEx(ad51, cv2.MORPH_CLOSE, kernel, iterations=1)
-    masks["Adaptativo 51"] = ad51
-
-    return masks
-
-
-# ============================================================
-# ESCOLHA AUTOMÁTICA DA MELHOR MÁSCARA
-# ============================================================
-def avaliar_mascara(mask, shape):
-    h, w = shape[:2]
-    total = h * w
-
-    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-
-    areas = []
-    n_borda = 0
-
-    for i in range(1, n_labels):
-        x, y, ww, hh, area = stats[i]
-        if area < 20:
-            continue
-
-        areas.append(area)
-
-        toca_borda = (x <= 1) or (y <= 1) or (x + ww >= w - 1) or (y + hh >= h - 1)
-        if toca_borda:
-            n_borda += 1
-
-    if len(areas) == 0:
-        return {
-            "score": -1e9,
-            "n_comp": 0,
-            "media_area": 0,
-            "std_area": 0,
-            "frac_borda": 1.0
-        }
-
-    n_comp = len(areas)
-    media_area = float(np.mean(areas))
-    std_area = float(np.std(areas))
-    frac_borda = n_borda / max(n_comp, 1)
-
-    # Queremos evitar zero componentes, evitar milhares de pontos minúsculos,
-    # e evitar tudo grudado em poucas regiões enormes.
-    score = 0.0
-    score += -abs(n_comp - 180) * 0.8
-    score += media_area * 0.08
-    score += -std_area * 0.01
-    score += -frac_borda * 120
+    realcado_proc = aplicar_mascara_exclusao(realcado, mask_exclusao, valor=255)
+    grad_proc = aplicar_mascara_exclusao(grad_mag, mask_exclusao, valor=0)
 
     return {
-        "score": score,
-        "n_comp": n_comp,
-        "media_area": media_area,
-        "std_area": std_area,
-        "frac_borda": frac_borda
+        "gray_vis": gray_vis,
+        "clahe_vis": clahe_vis,
+        "bilateral_vis": bilateral_vis,
+        "realcado_vis": realcado_vis,
+        "grad_vis": grad_vis,
+        "gray_proc": gray_proc,
+        "clahe_proc": clahe_proc,
+        "bilateral_proc": bilateral_proc,
+        "realcado_proc": realcado_proc,
+        "grad_proc": grad_proc
     }
 
 
-def escolher_melhor_mascara(masks, shape):
-    melhor_nome = None
-    melhor_mask = None
-    melhor_eval = None
-    melhor_score = -1e18
-
-    avaliacoes = {}
-
-    for nome, mask in masks.items():
-        ev = avaliar_mascara(mask, shape)
-        avaliacoes[nome] = ev
-        if ev["score"] > melhor_score:
-            melhor_score = ev["score"]
-            melhor_nome = nome
-            melhor_mask = mask
-            melhor_eval = ev
-
-    return melhor_nome, melhor_mask, melhor_eval, avaliacoes
-
-
 # ============================================================
-# WATERSHED
+# FAIXAS AUTOMÁTICAS DE RAIO
 # ============================================================
-def processar_watershed(binary_mask, img_gray, marker_factor):
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-
-    opening = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel, iterations=2)
-    sure_bg = cv2.dilate(opening, kernel, iterations=2)
-
-    dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
-    dist_norm = cv2.normalize(dist_transform, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    _, sure_fg = cv2.threshold(dist_transform, marker_factor * dist_transform.max(), 255, 0)
-    sure_fg = np.uint8(sure_fg)
-
-    unknown = cv2.subtract(sure_bg, sure_fg)
-
-    _, markers = cv2.connectedComponents(sure_fg)
-    markers = markers + 1
-    markers[unknown == 255] = 0
-
-    img_bgr = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
-    markers = cv2.watershed(img_bgr, markers)
-
-    return markers, dist_norm, sure_fg, sure_bg
-
-
-# ============================================================
-# EXTRAÇÃO DAS BOLHAS A PARTIR DOS MARKERS
-# ============================================================
-def extrair_bolhas_dos_markers(markers, shape, px_per_mm=None):
+def obter_faixas_raio(shape, px_per_mm=None):
     h, w = shape[:2]
-    bolhas = []
+    base = min(h, w)
 
-    labels_unicos = np.unique(markers)
+    if px_per_mm is not None and px_per_mm > 0:
+        # usando a régua como referência
+        pequeno = (max(4, int(px_per_mm * 0.015)), max(8, int(px_per_mm * 0.060)))
+        medio = (max(8, int(px_per_mm * 0.060)), max(18, int(px_per_mm * 0.160)))
+        grande = (max(18, int(px_per_mm * 0.160)), max(45, int(px_per_mm * 0.350)))
+    else:
+        pequeno = (4, max(10, int(base * 0.012)))
+        medio = (max(10, int(base * 0.012)), max(22, int(base * 0.035)))
+        grande = (max(22, int(base * 0.035)), max(55, int(base * 0.10)))
 
-    for lab in labels_unicos:
-        if lab <= 1:
-            continue
+    faixas = [
+        ("Pequenas", pequeno[0], pequeno[1], 16),
+        ("Médias", medio[0], medio[1], 22),
+        ("Grandes", grande[0], grande[1], 28),
+    ]
 
-        reg = np.uint8(markers == lab) * 255
-        cnts, _ = cv2.findContours(reg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    faixas_validas = []
+    for nome, rmin, rmax, min_dist in faixas:
+        if rmax > rmin:
+            faixas_validas.append((nome, rmin, rmax, min_dist))
 
-        if not cnts:
-            continue
-
-        cnt = max(cnts, key=cv2.contourArea)
-        area = cv2.contourArea(cnt)
-
-        if area < 80:
-            continue
-
-        peri = cv2.arcLength(cnt, True)
-        if peri <= 0:
-            continue
-
-        circularidade = 4 * np.pi * area / (peri * peri)
-
-        hull = cv2.convexHull(cnt)
-        area_hull = cv2.contourArea(hull)
-        if area_hull <= 0:
-            continue
-
-        solidez = area / area_hull
-
-        x, y, ww, hh = cv2.boundingRect(cnt)
-
-        # rejeitar regiões que tocam muito a borda
-        if x <= 2 or y <= 2 or x + ww >= w - 2 or y + hh >= h - 2:
-            continue
-
-        # medidas principais
-        area_eq = area
-        diam_eq_px = np.sqrt((4.0 * area_eq) / np.pi)
-        raio_eq_px = diam_eq_px / 2.0
-
-        if diam_eq_px < 8:
-            continue
-
-        M = cv2.moments(cnt)
-        if M["m00"] == 0:
-            continue
-
-        cx = M["m10"] / M["m00"]
-        cy = M["m01"] / M["m00"]
-
-        diam_eq_um = None
-        if px_per_mm is not None and px_per_mm > 0:
-            diam_eq_um = (diam_eq_px / px_per_mm) * 1000.0
-
-        bolhas.append({
-            "contorno": cnt,
-            "area_px2": float(area),
-            "circularidade": float(circularidade),
-            "solidez": float(solidez),
-            "cx": float(cx),
-            "cy": float(cy),
-            "diam_eq_px": float(diam_eq_px),
-            "raio_eq_px": float(raio_eq_px),
-            "diam_eq_um": None if diam_eq_um is None else float(diam_eq_um),
-            "bbox": (x, y, ww, hh)
-        })
-
-    return bolhas
+    return faixas_validas
 
 
 # ============================================================
-# DESENHO
+# DETECÇÃO DE CÍRCULOS EM MÚLTIPLAS ESCALAS
 # ============================================================
-def desenhar_markers_coloridos(markers):
-    labels = markers.copy()
-    labels[labels < 0] = 0
+def detectar_circulos_multiescala(img_gray: np.ndarray, faixas):
+    candidatos = []
 
-    max_label = np.max(labels)
-    if max_label <= 0:
-        return np.zeros((labels.shape[0], labels.shape[1], 3), dtype=np.uint8)
+    for nome, rmin, rmax, min_dist in faixas:
+        # parâmetros ajustados por escala
+        if nome == "Pequenas":
+            dp = 1.1
+            param1 = 90
+            param2 = 13
+        elif nome == "Médias":
+            dp = 1.1
+            param1 = 95
+            param2 = 16
+        else:
+            dp = 1.2
+            param1 = 100
+            param2 = 18
 
-    norm = (labels.astype(np.float32) / max_label * 255).astype(np.uint8)
-    color = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
-    color[markers == -1] = [255, 255, 255]
-    return color
+        circles = cv2.HoughCircles(
+            img_gray,
+            cv2.HOUGH_GRADIENT,
+            dp=dp,
+            minDist=min_dist,
+            param1=param1,
+            param2=param2,
+            minRadius=rmin,
+            maxRadius=rmax
+        )
+
+        if circles is not None:
+            circles = np.round(circles[0, :]).astype(int)
+            for c in circles:
+                candidatos.append({
+                    "x": int(c[0]),
+                    "y": int(c[1]),
+                    "r": int(c[2]),
+                    "faixa": nome
+                })
+
+    return candidatos
 
 
-def desenhar_bolhas_segmentadas(img_bgr, bolhas):
-    out = img_bgr.copy()
-    rng = np.random.default_rng(42)
+# ============================================================
+# AJUDAS GEOMÉTRICAS
+# ============================================================
+def ponto_em_regiao_util(x, y, shape, margem_x_frac=0.08, margem_y_frac=0.06):
+    h, w = shape[:2]
+    mx = int(w * margem_x_frac)
+    my = int(h * margem_y_frac)
+    return (mx <= x <= w - mx) and (my <= y <= h - my)
 
-    for b in bolhas:
-        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
-        cnt = b["contorno"]
-        cv2.drawContours(out, [cnt], -1, color, 2)
 
-    cv2.putText(
-        out,
-        f"Bolhas detectadas: {len(bolhas)}",
-        (20, 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA
+def circulo_longe_da_borda(x, y, r, shape, margem=3):
+    h, w = shape[:2]
+    return (
+        x - r > margem and
+        y - r > margem and
+        x + r < w - margem and
+        y + r < h - margem
     )
 
+
+def sample_circle_points(cx, cy, r, n=72):
+    angs = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    pts = []
+    for a in angs:
+        x = int(round(cx + r * np.cos(a)))
+        y = int(round(cy + r * np.sin(a)))
+        pts.append((x, y))
+    return pts
+
+
+def valores_em_circulo(img, cx, cy, r, n=72):
+    h, w = img.shape[:2]
+    vals = []
+    for x, y in sample_circle_points(cx, cy, r, n=n):
+        if 0 <= x < w and 0 <= y < h:
+            vals.append(float(img[y, x]))
+    if len(vals) == 0:
+        return np.array([0.0], dtype=np.float32)
+    return np.array(vals, dtype=np.float32)
+
+
+def media_disco(img, cx, cy, r):
+    h, w = img.shape[:2]
+    x0 = max(0, int(cx - r))
+    x1 = min(w, int(cx + r + 1))
+    y0 = max(0, int(cy - r))
+    y1 = min(h, int(cy + r + 1))
+
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= r ** 2
+    vals = img[y0:y1, x0:x1][mask]
+
+    if vals.size == 0:
+        return 0.0
+    return float(np.mean(vals))
+
+
+# ============================================================
+# VALIDAÇÃO RADIAL DOS CÍRCULOS
+# ============================================================
+def validar_candidato_bolha(cand, gray_img, grad_img, shape):
+    cx = cand["x"]
+    cy = cand["y"]
+    r = cand["r"]
+
+    if not ponto_em_regiao_util(cx, cy, shape, 0.08, 0.06):
+        return None
+
+    if not circulo_longe_da_borda(cx, cy, r, shape, margem=3):
+        return None
+
+    if r < 4:
+        return None
+
+    # anel principal e regiões adjacentes
+    ring1 = valores_em_circulo(grad_img, cx, cy, max(2, int(round(r * 0.92))), n=96)
+    ring2 = valores_em_circulo(grad_img, cx, cy, r, n=96)
+    ring3 = valores_em_circulo(grad_img, cx, cy, max(2, int(round(r * 1.08))), n=96)
+
+    ring_grad = np.concatenate([ring1, ring2, ring3])
+    ring_grad_mean = float(np.mean(ring_grad))
+    ring_grad_std = float(np.std(ring_grad))
+
+    thr_edge = max(25.0, ring_grad_mean * 0.9)
+    edge_fraction = float(np.mean(ring_grad > thr_edge))
+
+    # contraste intensidade: interior / borda / exterior
+    inside_mean = media_disco(gray_img, cx, cy, max(1, int(round(r * 0.60))))
+    ring_gray = float(np.mean(valores_em_circulo(gray_img, cx, cy, r, n=96)))
+    outside_mean = media_disco(gray_img, cx, cy, max(1, int(round(r * 1.35)))) - media_disco(gray_img, cx, cy, max(1, int(round(r * 1.10))))
+    contrast_ring = abs(ring_gray - inside_mean)
+
+    # continuidade angular
+    continuity = edge_fraction
+
+    # estabilidade do anel: não queremos ring muito irregular
+    stability = 1.0 / (1.0 + ring_grad_std / max(1.0, ring_grad_mean))
+
+    # score final
+    score = (
+        0.45 * ring_grad_mean +
+        120.0 * continuity +
+        0.35 * contrast_ring +
+        80.0 * stability +
+        0.20 * r
+    )
+
+    # filtro mínimo para não aceitar reflexo fraco
+    if continuity < 0.18:
+        return None
+    if ring_grad_mean < 18:
+        return None
+
+    out = cand.copy()
+    out.update({
+        "score": float(score),
+        "ring_grad_mean": float(ring_grad_mean),
+        "edge_fraction": float(edge_fraction),
+        "contrast_ring": float(contrast_ring),
+        "stability": float(stability)
+    })
     return out
 
 
-# ============================================================
-# RESUMO
-# ============================================================
-def montar_resumo_bolhas(bolhas):
-    if not bolhas:
-        return pd.DataFrame([{
-            "Bolhas detectadas": 0,
-            "Area media (px2)": 0.0,
-            "Circularidade media": 0.0,
-            "Solidez media": 0.0,
-            "Diametro equivalente medio (px)": 0.0,
-            "Diametro equivalente medio (um)": 0.0
-        }])
-
-    areas = [b["area_px2"] for b in bolhas]
-    circs = [b["circularidade"] for b in bolhas]
-    sols = [b["solidez"] for b in bolhas]
-    dpx = [b["diam_eq_px"] for b in bolhas]
-    dum = [b["diam_eq_um"] for b in bolhas if b["diam_eq_um"] is not None]
-
-    return pd.DataFrame([{
-        "Bolhas detectadas": len(bolhas),
-        "Area media (px2)": round(float(np.mean(areas)), 2),
-        "Circularidade media": round(float(np.mean(circs)), 4),
-        "Solidez media": round(float(np.mean(sols)), 4),
-        "Diametro equivalente medio (px)": round(float(np.mean(dpx)), 2),
-        "Diametro equivalente medio (um)": round(float(np.mean(dum)), 2) if len(dum) > 0 else 0.0
-    }])
+def validar_candidatos(candidatos, gray_img, grad_img, shape):
+    validos = []
+    for c in candidatos:
+        v = validar_candidato_bolha(c, gray_img, grad_img, shape)
+        if v is not None:
+            validos.append(v)
+    return validos
 
 
 # ============================================================
-# GRÁFICOS
+# REMOÇÃO DE DUPLICATAS
 # ============================================================
-def plotar_distribuicao(bolhas):
-    diametros = [b["diam_eq_um"] for b in bolhas if b["diam_eq_um"] is not None]
-    if len(diametros) == 0:
+def agrupar_candidatos_proximos(candidatos):
+    grupos = []
+    usados = [False] * len(candidatos)
+
+    for i, ci in enumerate(candidatos):
+        if usados[i]:
+            continue
+
+        grupo = [i]
+        usados[i] = True
+        mudou = True
+
+        while mudou:
+            mudou = False
+            for j, cj in enumerate(candidatos):
+                if usados[j]:
+                    continue
+
+                for idx in grupo:
+                    ck = candidatos[idx]
+                    dist = math.hypot(ck["x"] - cj["x"], ck["y"] - cj["y"])
+                    r_ref = max(ck["r"], cj["r"])
+                    dr = abs(ck["r"] - cj["r"])
+
+                    if dist <= 0.75 * r_ref and dr <= 0.45 * r_ref:
+                        grupo.append(j)
+                        usados[j] = True
+                        mudou = True
+                        break
+
+        grupos.append([candidatos[k] for k in grupo])
+
+    return grupos
+
+
+def manter_melhor_por_grupo(candidatos):
+    if not candidatos:
+        return []
+
+    grupos = agrupar_candidatos_proximos(candidatos)
+    finais = []
+
+    for g in grupos:
+        melhor = max(g, key=lambda x: x["score"])
+        finais.append(melhor)
+
+    return finais
+
+
+# ============================================================
+# MEDIÇÃO
+# ============================================================
+def montar_dataframe_bolhas(candidatos, px_per_mm):
+    dados = []
+    for i, c in enumerate(candidatos, start=1):
+        diam_px = 2.0 * c["r"]
+        diam_um = None
+        if px_per_mm is not None and px_per_mm > 0:
+            diam_um = (diam_px / px_per_mm) * 1000.0
+
+        dados.append({
+            "Bolha": i,
+            "Centro X (px)": c["x"],
+            "Centro Y (px)": c["y"],
+            "Raio (px)": round(float(c["r"]), 2),
+            "Diâmetro (px)": round(float(diam_px), 2),
+            "Diâmetro (µm)": None if diam_um is None else round(float(diam_um), 2),
+            "Score": round(float(c["score"]), 2),
+            "Continuidade": round(float(c["edge_fraction"]), 3),
+            "Contraste do anel": round(float(c["contrast_ring"]), 2),
+            "Faixa": c["faixa"]
+        })
+
+    return pd.DataFrame(dados)
+
+
+def plotar_distribuicao(df):
+    if "Diâmetro (µm)" not in df.columns or df["Diâmetro (µm)"].dropna().empty:
         return None, None, None
 
-    diametros = np.array(diametros)
+    diametros = df["Diâmetro (µm)"].dropna().values
     max_d = max(600, int(np.ceil(diametros.max() / 100.0) * 100))
     bins = list(range(0, max_d + 100, 100))
+
     contagens, bordas = np.histogram(diametros, bins=bins)
     labels = [f"{int(bordas[i])}-{int(bordas[i+1])}" for i in range(len(bordas) - 1)]
     centros = [(bordas[i] + bordas[i + 1]) / 2 for i in range(len(bordas) - 1)]
@@ -489,6 +507,39 @@ def plotar_distribuicao(bolhas):
 
 
 # ============================================================
+# DESENHO
+# ============================================================
+def desenhar_candidatos(img_bgr, candidatos, titulo="Bolhas detectadas"):
+    out = img_bgr.copy()
+    rng = np.random.default_rng(42)
+
+    for c in candidatos:
+        color = tuple(int(v) for v in rng.integers(60, 256, size=3))
+        cv2.circle(out, (int(c["x"]), int(c["y"])), int(c["r"]), color, 2)
+
+    cv2.putText(
+        out,
+        f"{titulo}: {len(candidatos)}",
+        (20, 35),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA
+    )
+    return out
+
+
+def desenhar_regiao_util(img_bgr):
+    out = img_bgr.copy()
+    h, w = out.shape[:2]
+    mx = int(w * 0.08)
+    my = int(h * 0.06)
+    cv2.rectangle(out, (mx, my), (w - mx, h - my), (255, 255, 0), 2)
+    return out
+
+
+# ============================================================
 # TELA PRINCIPAL
 # ============================================================
 def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
@@ -509,14 +560,6 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         if not escolhido:
             return
 
-        # ÚNICO AJUSTE PERMITIDO AO USUÁRIO
-        marker_factor = st.selectbox(
-            "Sensibilidade interna do Watershed",
-            [0.20, 0.28, 0.35],
-            index=1,
-            help="Valores menores capturam mais bolhas pequenas; valores maiores ficam mais conservadores."
-        )
-
         try:
             url_imagem = montar_url_publica(escolhido)
             img_original_pil = baixar_imagem(url_imagem)
@@ -525,31 +568,30 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             barra_px_auto, img_calibracao, barra_info = detectar_barra_escala_px(img_original_bgr)
             mask_exclusao = criar_mascara_regioes_excluidas(img_original_bgr.shape, barra_info)
 
-            gray_vis, clahe_vis, bilateral_vis, bilateral_proc = gerar_imagens_base(
-                img_original_bgr,
-                mask_exclusao
+            prep = preprocessar_base(img_original_bgr, mask_exclusao)
+
+            faixas = obter_faixas_raio(img_original_bgr.shape, barra_px_auto)
+
+            candidatos_brutos = detectar_circulos_multiescala(
+                prep["realcado_proc"],
+                faixas
             )
 
-            masks = gerar_mascaras_candidatas(bilateral_proc, mask_exclusao)
-            melhor_nome, melhor_mask, melhor_eval, avaliacoes = escolher_melhor_mascara(
-                masks,
+            candidatos_validos = validar_candidatos(
+                candidatos_brutos,
+                prep["gray_proc"],
+                prep["grad_proc"],
                 img_original_bgr.shape
             )
 
-            markers, dist_norm, sure_fg, sure_bg = processar_watershed(
-                melhor_mask,
-                bilateral_proc,
-                marker_factor
-            )
+            candidatos_finais = manter_melhor_por_grupo(candidatos_validos)
 
-            bolhas = extrair_bolhas_dos_markers(
-                markers,
-                img_original_bgr.shape,
-                px_per_mm=barra_px_auto
-            )
+            img_regiao = desenhar_regiao_util(img_original_bgr)
+            img_brutos = desenhar_candidatos(img_original_bgr, candidatos_brutos, "Candidatos brutos")
+            img_validos = desenhar_candidatos(img_original_bgr, candidatos_validos, "Candidatos válidos")
+            img_finais = desenhar_candidatos(img_original_bgr, candidatos_finais, "Bolhas detectadas")
 
-            img_markers = desenhar_markers_coloridos(markers)
-            img_bolhas = desenhar_bolhas_segmentadas(img_original_bgr, bolhas)
+            df = montar_dataframe_bolhas(candidatos_finais, barra_px_auto)
 
             st.markdown("## Calibração")
             if barra_px_auto is not None:
@@ -557,69 +599,67 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
             else:
                 st.warning("Barra não detectada automaticamente.")
 
-            st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm detectada", width=460)
+            st.image(cv_to_pil(img_calibracao), caption="Barra de 1,0 mm detectada", width=480)
 
-            st.markdown("## Pré-processamento automático")
-            c1, c2, c3 = st.columns(3)
+            st.markdown("## Pré-processamento")
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.caption("Imagem original")
-                st.image(img_original_pil, width=240)
+                st.image(img_original_pil, width=220)
             with c2:
                 st.caption("CLAHE")
-                st.image(clahe_vis, width=240)
+                st.image(prep["clahe_vis"], width=220)
             with c3:
                 st.caption("Filtro bilateral")
-                st.image(bilateral_vis, width=240)
-
-            st.markdown("## Máscaras candidatas")
-            m1, m2, m3 = st.columns(3)
-            nomes = list(masks.keys())
-            with m1:
-                st.caption(nomes[0])
-                st.image(masks[nomes[0]], width=240)
-            with m2:
-                st.caption(nomes[1])
-                st.image(masks[nomes[1]], width=240)
-            with m3:
-                st.caption(nomes[2])
-                st.image(masks[nomes[2]], width=240)
-
-            st.info(f"Máscara escolhida automaticamente: **{melhor_nome}**")
-
-            st.markdown("## Watershed")
-            w1, w2, w3 = st.columns(3)
-            with w1:
-                st.caption("Mapa de distância")
-                st.image(dist_norm, width=240)
-            with w2:
-                st.caption("Foreground seguro")
-                st.image(sure_fg, width=240)
-            with w3:
-                st.caption("Markers / regiões")
-                st.image(cv_to_pil(img_markers), width=240)
-
-            st.markdown("## Resultado automático")
-            st.image(cv_to_pil(img_bolhas), width=760)
+                st.image(prep["bilateral_vis"], width=220)
+            with c4:
+                st.caption("Realce suave")
+                st.image(prep["realcado_vis"], width=220)
 
             st.markdown("## Diagnóstico")
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Componentes da máscara", melhor_eval["n_comp"])
-            d2.metric("Marker factor", marker_factor)
-            d3.metric("Bolhas detectadas", len(bolhas))
+            d1, d2 = st.columns(2)
+            with d1:
+                st.caption("Gradiente usado na validação")
+                st.image(prep["grad_vis"], width=420)
+            with d2:
+                st.caption("Região útil considerada")
+                st.image(cv_to_pil(img_regiao), width=420)
+
+            st.markdown("## Nova estratégia")
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                st.caption("Candidatos brutos multiescala")
+                st.image(cv_to_pil(img_brutos), width=280)
+            with r2:
+                st.caption("Após validação radial")
+                st.image(cv_to_pil(img_validos), width=280)
+            with r3:
+                st.caption("Após remover duplicatas")
+                st.image(cv_to_pil(img_finais), width=280)
+
+            st.markdown("## Diagnóstico numérico")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Candidatos brutos", len(candidatos_brutos))
+            k2.metric("Candidatos válidos", len(candidatos_validos))
+            k3.metric("Bolhas detectadas", len(candidatos_finais))
 
             st.markdown("## Resumo")
-            st.dataframe(montar_resumo_bolhas(bolhas), use_container_width=True)
+            if df.empty:
+                st.warning("Nenhuma bolha foi detectada com a nova estratégia.")
+                return
 
-            if len(bolhas) > 0:
-                maiores_500 = [b for b in bolhas if b["diam_eq_um"] is not None and b["diam_eq_um"] > 500]
-                pct_500 = 100.0 * len(maiores_500) / len(bolhas)
+            st.dataframe(df, use_container_width=True)
 
-                k1, k2, k3 = st.columns(3)
-                k1.metric("Bolhas > 500 µm", len(maiores_500))
-                k2.metric("% > 500 µm", f"{pct_500:.2f}%")
-                k3.metric("Bolhas totais", len(bolhas))
+            if "Diâmetro (µm)" in df.columns and not df["Diâmetro (µm)"].dropna().empty:
+                maiores_500 = df[df["Diâmetro (µm)"] > 500]
+                pct_500 = 100.0 * len(maiores_500) / len(df)
 
-                fig_bar, fig_curve, tabela = plotar_distribuicao(bolhas)
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Bolhas > 500 µm", len(maiores_500))
+                s2.metric("% > 500 µm", f"{pct_500:.2f}%")
+                s3.metric("Diâmetro médio (µm)", f"{df['Diâmetro (µm)'].mean():.2f}")
+
+                fig_bar, fig_curve, tabela = plotar_distribuicao(df)
                 if fig_bar is not None:
                     st.markdown("## Distribuição granulométrica")
                     st.pyplot(fig_bar)
