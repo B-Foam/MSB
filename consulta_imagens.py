@@ -657,7 +657,10 @@ def render_consulta_imagens(
     st.subheader("Consulta de imagens")
 
     try:
-        lista_bruta = listar_imagens_supabase()
+        try:
+            lista_bruta = listar_imagens_supabase("")
+        except TypeError:
+            lista_bruta = listar_imagens_supabase()
     except Exception as e:
         st.error(f"Erro ao listar imagens: {e}")
         return
@@ -666,6 +669,9 @@ def render_consulta_imagens(
 
     if not itens:
         st.warning("Nenhuma imagem encontrada.")
+        with st.expander("Diagnóstico"):
+            st.write("Retorno bruto da listagem:")
+            st.write(lista_bruta)
         return
 
     nomes = [it["nome"] for it in itens]
@@ -678,6 +684,7 @@ def render_consulta_imagens(
     else:
         if not item_sel.get("path"):
             st.error("Não foi possível identificar o caminho da imagem.")
+            st.write(item_sel)
             return
         url_img = montar_url_publica(item_sel["path"])
 
@@ -685,12 +692,12 @@ def render_consulta_imagens(
         img_bgr = ler_imagem_url(url_img)
     except Exception as e:
         st.error(f"Erro ao carregar imagem: {e}")
+        st.write("URL usada:", url_img)
         return
 
     h, w = img_bgr.shape[:2]
     chave_img = item_sel.get("path") or item_sel.get("url") or item_sel["nome"]
 
-    # ROI em session_state
     key_roi = f"roi::{chave_img}"
     if key_roi not in session_state:
         session_state[key_roi] = roi_padrao(w, h)
