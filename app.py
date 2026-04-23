@@ -178,16 +178,9 @@ def get_app_password():
 
 def carregar_logo_msb_base64() -> str:
     caminhos_possiveis = [
-        LOGO_PATH,
-        "logo_msb.jpg",
-        "logo_msb.jpeg",
-        "msb_logo.png",
-        "msb_logo.jpg",
-        "assets/logo_msb.png",
-        "assets/logo_msb.jpg",
-        "assets/msb_logo.png",
-        "images/logo_msb.png",
-        "images/logo_msb.jpg",
+        LOGO_PATH,        
+        "logo-msb.png",
+       
     ]
 
     for caminho in caminhos_possiveis:
