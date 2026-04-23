@@ -235,7 +235,6 @@ def remover_pequenas_dentro_de_grandes(candidatos: List[Dict]) -> List[Dict]:
         for f in finais:
             dist = math.hypot(c["x"] - f["x"], c["y"] - f["y"])
 
-            # se uma pequena está muito dentro de uma maior, remove
             if c["r"] < 0.55 * f["r"] and dist + c["r"] < 0.82 * f["r"]:
                 manter = False
                 break
@@ -277,6 +276,10 @@ def detectar_bolhas_leve(
     roi_info: Dict[str, int],
     mask_roi: np.ndarray,
     px_per_mm: Optional[float],
+    param2_pequenas: int = 15,
+    score_min_pequenas: float = 5.5,
+    param2_medias_grandes: int = 14,
+    score_min_medias_grandes: float = 4.0,
 ):
     base = preprocessar_leve(img_bgr, mask_roi)
 
@@ -288,27 +291,25 @@ def detectar_bolhas_leve(
         px_per_mm_small = px_per_mm * scale
 
         faixas = [
-            # pequenas: menos permissiva
             {
                 "nome": "pequenas",
                 "minR": max(5, int(px_per_mm_small * 0.025)),
                 "maxR": max(10, int(px_per_mm_small * 0.045)),
                 "minDist": max(8, int(px_per_mm_small * 0.022)),
-                "param2": 15,
+                "param2": param2_pequenas,
             },
-            # médias/grandes: mais favorecida
             {
                 "nome": "medias_grandes",
                 "minR": max(10, int(px_per_mm_small * 0.045)),
                 "maxR": max(46, int(px_per_mm_small * 0.180)),
                 "minDist": max(12, int(px_per_mm_small * 0.040)),
-                "param2": 14,
+                "param2": param2_medias_grandes,
             },
         ]
     else:
         faixas = [
-            {"nome": "pequenas", "minR": 5, "maxR": 10, "minDist": 8, "param2": 15},
-            {"nome": "medias_grandes", "minR": 10, "maxR": 46, "minDist": 12, "param2": 14},
+            {"nome": "pequenas", "minR": 5, "maxR": 10, "minDist": 8, "param2": param2_pequenas},
+            {"nome": "medias_grandes", "minR": 10, "maxR": 46, "minDist": 12, "param2": param2_medias_grandes},
         ]
 
     for faixa in faixas:
@@ -340,12 +341,11 @@ def detectar_bolhas_leve(
 
             score = score_circulo(base, x, y, r)
 
-            # pequenas exigem score maior
             if faixa["nome"] == "pequenas":
-                if score < 5.5:
+                if score < score_min_pequenas:
                     continue
             else:
-                if score < 4.0:
+                if score < score_min_medias_grandes:
                     continue
 
             candidatos.append(
@@ -521,6 +521,51 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
 
         session_state.roi_consulta[imagem_escolhida] = roi_info
 
+        st.markdown("### Ajustes de sensibilidade")
+        c1, c2 = st.columns(2)
+
+        with c1:
+            param2_pequenas = st.slider(
+                "param2 — bolhas pequenas",
+                min_value=8,
+                max_value=25,
+                value=15,
+                step=1,
+                help="Maior valor = menos bolhas pequenas detectadas",
+                key=f"param2_peq_{imagem_escolhida}",
+            )
+
+            score_min_pequenas = st.slider(
+                "score mínimo — bolhas pequenas",
+                min_value=2.0,
+                max_value=10.0,
+                value=5.5,
+                step=0.1,
+                help="Maior valor = filtro mais rígido para bolhas pequenas",
+                key=f"score_peq_{imagem_escolhida}",
+            )
+
+        with c2:
+            param2_medias_grandes = st.slider(
+                "param2 — bolhas médias/grandes",
+                min_value=8,
+                max_value=25,
+                value=14,
+                step=1,
+                help="Menor valor = mais bolhas médias/grandes detectadas",
+                key=f"param2_medg_{imagem_escolhida}",
+            )
+
+            score_min_medias_grandes = st.slider(
+                "score mínimo — bolhas médias/grandes",
+                min_value=2.0,
+                max_value=10.0,
+                value=4.0,
+                step=0.1,
+                help="Menor valor = mais bolhas médias/grandes aceitas",
+                key=f"score_medg_{imagem_escolhida}",
+            )
+
         mask_roi = criar_mascara_roi(img_bgr.shape, roi_info, barra_info)
 
         st.markdown("### Imagem 1 — área útil + calibração")
@@ -539,6 +584,10 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                     roi_info=roi_info,
                     mask_roi=mask_roi,
                     px_per_mm=px_per_mm,
+                    param2_pequenas=param2_pequenas,
+                    score_min_pequenas=score_min_pequenas,
+                    param2_medias_grandes=param2_medias_grandes,
+                    score_min_medias_grandes=score_min_medias_grandes,
                 )
 
                 img_final = desenhar_bolhas_coloridas(
