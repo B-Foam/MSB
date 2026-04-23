@@ -29,6 +29,56 @@ st.set_page_config(
     layout="wide",
 )
 
+LOGO_PATH = "logo_msb.png"
+
+
+# ============================================================
+# CONTROLE DE ACESSO POR SENHA
+# ============================================================
+def get_app_password():
+    return (
+        st.secrets.get("APP_PASSWORD")
+        or os.getenv("APP_PASSWORD")
+    )
+
+
+def garantir_login():
+    if "app_autenticado" not in st.session_state:
+        st.session_state.app_autenticado = False
+
+    senha_correta = get_app_password()
+
+    if not senha_correta:
+        st.error("APP_PASSWORD não configurada nos secrets.")
+        st.stop()
+
+    if st.session_state.app_autenticado:
+        return
+
+    st.markdown(
+        """
+        <div class="login-box">
+            <div class="login-title">Acesso restrito</div>
+            <div class="login-subtitle">Digite a senha para acessar a plataforma.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form("form_login_app", clear_on_submit=False):
+        senha = st.text_input("Senha", type="password")
+        entrar = st.form_submit_button("Entrar")
+
+        if entrar:
+            if senha == senha_correta:
+                st.session_state.app_autenticado = True
+                st.success("Acesso liberado.")
+                st.rerun()
+            else:
+                st.error("Senha incorreta.")
+
+    st.stop()
+
 
 # ============================================================
 # GOOGLE DRIVE
@@ -224,8 +274,8 @@ def get_mime_type(uploaded_file, extensao):
 
 def carregar_logo_msb_base64() -> str:
     caminhos_possiveis = [
-        "logo_msb.png",
-        "msb_logo.png",
+        LOGO_PATH,
+        "msb-logo.png",
         "assets/logo_msb.png",
         "assets/msb_logo.png",
         "images/logo_msb.png",
@@ -367,6 +417,30 @@ st.markdown("""
     .bloco-selecao {
         margin-top: 18px;
     }
+
+    .login-box {
+        width: 100%;
+        max-width: 520px;
+        margin: 60px auto 20px auto;
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 24px 28px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        text-align: center;
+    }
+
+    .login-title {
+        color: #0A2A66;
+        font-size: 2em;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .login-subtitle {
+        color: #35557C;
+        font-size: 1em;
+        font-weight: 500;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -424,10 +498,18 @@ with st.sidebar:
             **Senha**: `Bfoam-50`
             """)
 
+    if st.session_state.get("app_autenticado", False):
+        st.divider()
+        if st.button("Encerrar sessão"):
+            st.session_state.app_autenticado = False
+            st.rerun()
+
 
 # ============================================================
-# TELAS
+# MAIN
 # ============================================================
+garantir_login()
+
 if st.session_state.pagina == "selecao":
     render_banner_bfoam()
 
@@ -474,9 +556,6 @@ elif st.session_state.pagina == "cadastro":
         st.session_state.pagina = "selecao"
         st.rerun()
 
-    # ========================================================
-    # GRANULOMETRIA
-    # ========================================================
     if st.session_state.tipo_selecionado == "Granulometria":
         aba_resultados, aba_cadastro_img, aba_consulta = st.tabs(
             ["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"]
@@ -561,9 +640,6 @@ elif st.session_state.pagina == "cadastro":
                 salvar_resultado_teste=salvar_resultado_teste_supabase,
             )
 
-    # ========================================================
-    # OUTRAS ANÁLISES (mantém comportamento antigo no Drive)
-    # ========================================================
     else:
         with st.form("form_novo_teste", clear_on_submit=True):
             amostra = st.text_input("Amostra (ex: 001)")
