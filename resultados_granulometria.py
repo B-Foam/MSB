@@ -189,6 +189,9 @@ def dataframe_para_csv_bytes(df: pd.DataFrame) -> bytes:
 def render_resultados_granulometria(listar_resultados_granulometria_supabase):
     st.markdown("### Resultados")
 
+    if st.button("Atualizar resultados", key="btn_atualizar_resultados_supabase"):
+        st.rerun()
+
     resultados, erro = listar_resultados_granulometria_supabase()
     if erro:
         st.error(f"Erro ao carregar resultados do Supabase: {erro}")
@@ -263,6 +266,9 @@ def render_resultados_granulometria(listar_resultados_granulometria_supabase):
 
     st.markdown("### Tabela bruta dos testes")
     st.dataframe(df, use_container_width=True)
+
+    with st.expander("Diagnóstico — registros crus vindos do Supabase"):
+        st.write(resultados)
 
     st.markdown("### Exportação dos resultados")
     csv_resumo_grupo = dataframe_para_csv_bytes(resumo_grupo)
