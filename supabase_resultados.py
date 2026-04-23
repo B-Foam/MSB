@@ -7,8 +7,17 @@ import streamlit as st
 
 @st.cache_resource
 def get_supabase_client() -> Client:
-    url = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
-    key = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
+   url = (
+    st.secrets.get("SUPABASE_URL")
+    or st.secrets.get("supabase", {}).get("SUPABASE_URL")
+    or os.getenv("SUPABASE_URL")
+)
+
+key = (
+    st.secrets.get("SUPABASE_KEY")
+    or st.secrets.get("supabase", {}).get("SUPABASE_KEY")
+    or os.getenv("SUPABASE_KEY")
+)
 
     if not url or not key:
         raise ValueError("SUPABASE_URL ou SUPABASE_KEY não configurados.")
