@@ -326,14 +326,20 @@ if st.session_state.pagina == "selecao":
 
     c1, c2, c3 = st.columns(3)
 
-    if c1.button("Meia-Vida"):
-        ir_para_cadastro("Meia-Vida")
+    with c1:
+        if st.button("Teste de Meia-Vida", use_container_width=True):
+            ir_para_cadastro("Meia-Vida")
+        st.caption("Avalia o tempo de decaimento da espuma.")
 
-    if c2.button("Granulometria"):
-        ir_para_cadastro("Granulometria")
+    with c2:
+        if st.button("Teste de Granulometria", use_container_width=True):
+            ir_para_cadastro("Granulometria")
+        st.caption("Mede a distribuição do tamanho das bolhas.")
 
-    if c3.button("Estabilidade"):
-        ir_para_cadastro("Estabilidade Dinâmica")
+    with c3:
+        if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
+            ir_para_cadastro("Estabilidade Dinâmica")
+        st.caption("Verifica a resistência estrutural da espuma.")
 
 
 elif st.session_state.pagina == "cadastro":
