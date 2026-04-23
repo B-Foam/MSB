@@ -1,9 +1,12 @@
 import io
 import math
-from typing import Dict, Optional, Tuple, List
+import os
+import json
+from typing import Dict, Optional, Tuple, List, Callable, Any
 
 import cv2
 import numpy as np
+import pandas as pd
 import requests
 import streamlit as st
 from PIL import Image
@@ -39,6 +42,12 @@ def garantir_estado(session_state):
         session_state.lista_imagens_consulta = []
     if "roi_consulta" not in session_state:
         session_state.roi_consulta = {}
+    if "resultados_testes_granulometria" not in session_state:
+        session_state.resultados_testes_granulometria = []
+
+
+def extrair_tag_teste(nome_arquivo: str) -> str:
+    return os.path.splitext(os.path.basename(nome_arquivo))[0]
 
 
 # ============================================================
@@ -350,10 +359,12 @@ def detectar_bolhas_leve(
 
             candidatos.append(
                 {
+                    "id": len(candidatos) + 1,
                     "x": float(x),
                     "y": float(y),
                     "r": float(r),
                     "score": float(score),
+                    "grupo": faixa["nome"],
                 }
             )
 
@@ -364,6 +375,9 @@ def detectar_bolhas_leve(
         scores = np.array([b["score"] for b in bolhas], dtype=float)
         limiar = max(5.0, float(np.percentile(scores, 25)))
         bolhas = [b for b in bolhas if b["score"] >= limiar]
+
+    for i, b in enumerate(bolhas, start=1):
+        b["id"] = i
 
     return bolhas
 
@@ -452,9 +466,99 @@ def desenhar_bolhas_coloridas(
 
 
 # ============================================================
+# TRATAMENTO DOS RESULTADOS
+# ============================================================
+def montar_tabela_bolhas(bolhas: List[Dict], px_per_mm: Optional[float]) -> pd.DataFrame:
+    registros = []
+
+    for b in bolhas:
+        diametro_px = 2.0 * float(b["r"])
+
+        if px_per_mm and px_per_mm > 0:
+            diametro_mm = diametro_px / float(px_per_mm)
+            diametro_um = diametro_mm * 1000.0
+        else:
+            diametro_mm = np.nan
+            diametro_um = np.nan
+
+        registros.append({
+            "id": b.get("id"),
+            "x_px": round(float(b["x"]), 2),
+            "y_px": round(float(b["y"]), 2),
+            "raio_px": round(float(b["r"]), 2),
+            "diametro_px": round(diametro_px, 2),
+            "diametro_mm": round(diametro_mm, 6) if pd.notna(diametro_mm) else np.nan,
+            "diametro_um": round(diametro_um, 2) if pd.notna(diametro_um) else np.nan,
+            "score": round(float(b.get("score", np.nan)), 4),
+            "grupo": b.get("grupo", ""),
+            "maior_500_um": bool(diametro_um > 500.0) if pd.notna(diametro_um) else False,
+        })
+
+    df = pd.DataFrame(registros)
+
+    if not df.empty:
+        df = df.sort_values(by="diametro_um", ascending=False, na_position="last").reset_index(drop=True)
+
+    return df
+
+
+def montar_tabela_faixas(df_bolhas: pd.DataFrame) -> pd.DataFrame:
+    if df_bolhas.empty or "diametro_um" not in df_bolhas.columns:
+        return pd.DataFrame(columns=["faixa_um", "quantidade"])
+
+    bins = [0, 100, 200, 300, 400, 500, 1000, 2000, np.inf]
+    labels = [
+        "0–100",
+        "100–200",
+        "200–300",
+        "300–400",
+        "400–500",
+        "500–1000",
+        "1000–2000",
+        ">2000",
+    ]
+
+    serie = df_bolhas["diametro_um"].dropna()
+    categorias = pd.cut(serie, bins=bins, labels=labels, right=False, include_lowest=True)
+    contagem = categorias.value_counts().reindex(labels, fill_value=0)
+
+    df_faixas = pd.DataFrame({
+        "faixa_um": labels,
+        "quantidade": contagem.values,
+    })
+
+    return df_faixas
+
+
+def dataframe_para_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False, sep=";").encode("utf-8-sig")
+
+
+def montar_payload_resultado(
+    tag_teste: str,
+    percentual_maior_500: float,
+    quantidade_total: int,
+    df_bolhas: pd.DataFrame,
+    df_faixas: pd.DataFrame,
+) -> Dict[str, Any]:
+    return {
+        "tag_teste": tag_teste,
+        "percentual_bolhas_maiores_500_um": round(float(percentual_maior_500), 4),
+        "quantidade_total_bolhas": int(quantidade_total),
+        "grafico_barras_resultados": df_faixas.to_dict(orient="records"),
+        "tabela_bolhas": df_bolhas.to_dict(orient="records"),
+    }
+
+
+# ============================================================
 # RENDER PRINCIPAL
 # ============================================================
-def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session_state):
+def render_consulta_imagens(
+    listar_imagens_supabase,
+    montar_url_publica,
+    session_state,
+    salvar_resultado_teste: Optional[Callable[[Dict[str, Any]], Any]] = None,
+):
     garantir_estado(session_state)
 
     with st.container(border=True):
@@ -577,6 +681,8 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
         else:
             st.warning("Barra de calibração não detectada automaticamente.")
 
+        key_bolhas = f"bolhas_detectadas::{imagem_escolhida}"
+
         if st.button("Detectar bolhas", key=f"processar_{imagem_escolhida}"):
             with st.spinner("Detectando bolhas..."):
                 bolhas = detectar_bolhas_leve(
@@ -589,14 +695,76 @@ def render_consulta_imagens(listar_imagens_supabase, montar_url_publica, session
                     param2_medias_grandes=param2_medias_grandes,
                     score_min_medias_grandes=score_min_medias_grandes,
                 )
+                session_state[key_bolhas] = bolhas
 
-                img_final = desenhar_bolhas_coloridas(
-                    shape=img_bgr.shape,
-                    roi_info=roi_info,
-                    bolhas=bolhas,
-                    barra_info=barra_info,
-                )
+        bolhas = session_state.get(key_bolhas, [])
 
-                st.markdown("### Imagem 2 — bolhas detectadas")
-                st.image(cv_to_pil(img_final), use_container_width=True)
-                st.info(f"Bolhas detectadas: {len(bolhas)}")
+        st.markdown("### Imagem 2 — bolhas detectadas")
+        if bolhas:
+            img_final = desenhar_bolhas_coloridas(
+                shape=img_bgr.shape,
+                roi_info=roi_info,
+                bolhas=bolhas,
+                barra_info=barra_info,
+            )
+            st.image(cv_to_pil(img_final), use_container_width=True)
+
+            df_bolhas = montar_tabela_bolhas(bolhas, px_per_mm)
+            df_faixas = montar_tabela_faixas(df_bolhas)
+
+            quantidade_total = int(len(df_bolhas))
+            quantidade_maior_500 = int(df_bolhas["maior_500_um"].sum()) if not df_bolhas.empty else 0
+            percentual_maior_500 = (100.0 * quantidade_maior_500 / quantidade_total) if quantidade_total > 0 else 0.0
+
+            st.markdown("### Resumo dos resultados")
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Quantidade total", quantidade_total)
+            with m2:
+                st.metric("Bolhas > 500 µm", quantidade_maior_500)
+            with m3:
+                st.metric("% > 500 µm", f"{percentual_maior_500:.2f}%")
+
+            st.markdown("### Gráfico de barras — distribuição por faixa (µm)")
+            st.bar_chart(df_faixas.set_index("faixa_um"))
+
+            st.markdown("### Tabela do gráfico de barras")
+            st.dataframe(df_faixas, use_container_width=True)
+
+            st.markdown("### Tabela de bolhas")
+            st.dataframe(df_bolhas, use_container_width=True)
+
+            csv_bolhas = dataframe_para_csv_bytes(df_bolhas)
+            tag_teste = extrair_tag_teste(imagem_escolhida)
+
+            st.download_button(
+                label="Baixar tabela de bolhas (CSV)",
+                data=csv_bolhas,
+                file_name=f"{tag_teste}_tabela_bolhas.csv",
+                mime="text/csv",
+                key=f"download_csv_bolhas_{imagem_escolhida}",
+            )
+
+            payload_resultado = montar_payload_resultado(
+                tag_teste=tag_teste,
+                percentual_maior_500=percentual_maior_500,
+                quantidade_total=quantidade_total,
+                df_bolhas=df_bolhas,
+                df_faixas=df_faixas,
+            )
+
+            if st.button("Armazenar dados do teste", key=f"salvar_teste_{imagem_escolhida}"):
+                try:
+                    if salvar_resultado_teste is not None:
+                        retorno = salvar_resultado_teste(payload_resultado)
+                        st.success("Dados do teste armazenados com sucesso.")
+                        if retorno is not None:
+                            st.caption(f"Retorno: {retorno}")
+                    else:
+                        session_state.resultados_testes_granulometria.append(payload_resultado)
+                        st.success("Dados do teste armazenados no session_state com sucesso.")
+                except Exception as e:
+                    st.error(f"Erro ao armazenar os dados do teste: {e}")
+
+        else:
+            st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
