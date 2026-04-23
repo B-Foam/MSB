@@ -483,7 +483,7 @@ garantir_login_total()
 # ============================================================
 with st.sidebar:
     st.header("Vídeos de Apoio")
-    st.video("https://youtu.be/hY5K55Ha2pg")
+    st.video("https://youtu.be/KkjUeiGazEc")
     st.write(f"Tutorial: {st.session_state.get('tipo_selecionado', 'Geral')}")
 
     st.markdown("### Pastas compartilhadas")
