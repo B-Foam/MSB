@@ -88,26 +88,14 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 110px;
+        min-width: 120px;
     }
 
     .banner-logo {
-        max-height: 78px;
-        max-width: 120px;
+        max-height: 80px;
+        max-width: 140px;
         object-fit: contain;
-    }
-
-    .banner-logo-placeholder {
-        width: 88px;
-        height: 88px;
-        border-radius: 16px;
-        background: #E9EEF6;
-        color: #0A2A66;
-        font-weight: bold;
-        font-size: 1.5em;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: block;
     }
 
     .banner-texto {
@@ -135,19 +123,17 @@ st.markdown("""
     }
 
     .login-wrapper {
-        min-height: 80vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        width: 100%;
+        padding-top: 20px;
     }
 
     .login-box {
         width: 100%;
         max-width: 520px;
-        margin: 40px auto;
+        margin: 0 auto 18px auto;
         background: #FFFFFF;
         border-radius: 18px;
-        padding: 28px 30px;
+        padding: 24px 28px;
         box-shadow: 0 4px 18px rgba(0,0,0,0.12);
         text-align: center;
     }
@@ -163,7 +149,17 @@ st.markdown("""
         color: #35557C;
         font-size: 1em;
         font-weight: 500;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
+    }
+
+    .login-form-box {
+        width: 100%;
+        max-width: 700px;
+        margin: 0 auto;
+        padding: 16px;
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 12px;
+        background: rgba(255,255,255,0.02);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -180,8 +176,65 @@ def get_app_password():
     )
 
 
+def carregar_logo_msb_base64() -> str:
+    caminhos_possiveis = [
+        LOGO_PATH,
+        "logo_msb.jpg",
+        "logo_msb.jpeg",
+        "msb_logo.png",
+        "msb_logo.jpg",
+        "assets/logo_msb.png",
+        "assets/logo_msb.jpg",
+        "assets/msb_logo.png",
+        "images/logo_msb.png",
+        "images/logo_msb.jpg",
+    ]
+
+    for caminho in caminhos_possiveis:
+        p = Path(caminho)
+        if p.exists() and p.is_file():
+            sufixo = p.suffix.lower()
+            mime = "image/png"
+            if sufixo in [".jpg", ".jpeg"]:
+                mime = "image/jpeg"
+
+            with open(p, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+
+            return f"data:{mime};base64,{data}"
+
+    return ""
+
+
+def render_banner_bfoam():
+    logo_base64 = carregar_logo_msb_base64()
+
+    if logo_base64:
+        logo_html = f'<img src="{logo_base64}" class="banner-logo" alt="Logo MSB">'
+    else:
+        logo_html = '<div style="color:#0A2A66;font-weight:700;">Logo não encontrada</div>'
+
+    st.markdown(
+        f"""
+        <div class="banner-topo">
+            <div class="banner-logo-area">
+                {logo_html}
+            </div>
+            <div class="banner-texto">
+                <div class="banner-titulo">B_Foam</div>
+                <div class="banner-subtitulo">Engenharia MSB - Plataforma de Análise</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_login_page():
+    render_banner_bfoam()
+
     st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+
     st.markdown(
         """
         <div class="login-box">
@@ -191,6 +244,8 @@ def render_login_page():
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown('<div class="login-form-box">', unsafe_allow_html=True)
 
     with st.form("form_login_app", clear_on_submit=False):
         senha = st.text_input("Senha", type="password")
@@ -207,7 +262,8 @@ def render_login_page():
             else:
                 st.error("Senha incorreta.")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def garantir_login_total():
@@ -409,50 +465,6 @@ def get_mime_type(uploaded_file, extensao):
         else:
             mime_type = "image/jpeg"
     return mime_type
-
-
-def carregar_logo_msb_base64() -> str:
-    caminhos_possiveis = [
-        LOGO_PATH,
-        "msb-logo.png",
-        "assets/logo_msb.png",
-        "assets/msb_logo.png",
-        "images/logo_msb.png",
-        "images/msb_logo.png",
-    ]
-
-    for caminho in caminhos_possiveis:
-        p = Path(caminho)
-        if p.exists() and p.is_file():
-            with open(p, "rb") as f:
-                data = base64.b64encode(f.read()).decode()
-            return f"data:image/png;base64,{data}"
-
-    return ""
-
-
-def render_banner_bfoam():
-    logo_base64 = carregar_logo_msb_base64()
-
-    if logo_base64:
-        logo_html = f'<img src="{logo_base64}" class="banner-logo" alt="Logo MSB">'
-    else:
-        logo_html = '<div class="banner-logo-placeholder">MSB</div>'
-
-    st.markdown(
-        f"""
-        <div class="banner-topo">
-            <div class="banner-logo-area">
-                {logo_html}
-            </div>
-            <div class="banner-texto">
-                <div class="banner-titulo">B_Foam</div>
-                <div class="banner-subtitulo">Engenharia MSB - Plataforma de Análise</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # ============================================================
