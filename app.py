@@ -1,6 +1,5 @@
 import os
 import io
-import base64
 import uuid
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -25,7 +24,7 @@ from supabase_resultados import (
 st.set_page_config(
     page_title="B-Foam MSB",
     page_icon="🔬",
-    layout="centered",
+    layout="wide",
 )
 
 
@@ -193,15 +192,6 @@ def upload_imagem_supabase(file_obj, nome_destino: Optional[str] = None) -> Tupl
 # ============================================================
 # AUXILIARES
 # ============================================================
-def get_image_as_base64(path):
-    try:
-        with open(path, "rb") as image_file:
-            data = base64.b64encode(image_file.read()).decode()
-        return f"data:image/png;base64,{data}"
-    except Exception:
-        return ""
-
-
 def montar_nome_arquivo(amostra, teste, tempo, concentracao, dispositivo, uploaded_file, outro_dispositivo=""):
     c_clean = concentracao.replace(",", "").replace("%", "")
     disp_final = outro_dispositivo if dispositivo == "Outros" else dispositivo
@@ -235,51 +225,39 @@ def get_mime_type(uploaded_file, extensao):
 # ============================================================
 st.markdown("""
 <style>
-    #header-container {
-        background-color: white;
-        color: black;
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        text-align: center;
-    }
-
     .titulo-amarelo {
         color: #FFD700;
-        font-size: 3.5em;
+        font-size: 3.2em;
         font-weight: bold;
         text-align: center;
-        margin: 20px 0;
+        margin: 20px 0 10px 0;
     }
 
-    .card {
-        background-color: #1E3A5F;
-        padding: 15px;
-        border-radius: 15px;
-        border: 1px solid #2E7BCF;
-        text-align: center;
-        height: 200px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-    }
-
-    .card h3 {
-        color: #FFFFFF;
-        font-size: 1.3em;
-        margin: 0 0 10px 0;
-    }
-
-    .card p {
+    .subtexto-card {
         color: #B9D1EA;
         font-size: 0.8em;
-        margin: 0;
-        line-height: 1.3;
+        margin-top: 6px;
+        line-height: 1.35;
+        text-align: left;
+    }
+
+    .sidebar-link-box {
+        border: 1px solid #2E7BCF;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-top: 10px;
+        background-color: rgba(255,255,255,0.02);
+    }
+
+    .sidebar-link-box a {
+        color: #B9D1EA !important;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .sidebar-link-box a:hover {
+        color: #FFFFFF !important;
+        text-decoration: underline;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -305,6 +283,30 @@ with st.sidebar:
     st.video("https://youtu.be/hY5K55Ha2pg")
     st.write(f"Tutorial: {st.session_state.get('tipo_selecionado', 'Geral')}")
 
+    st.markdown("### Pastas compartilhadas")
+
+    st.markdown(
+        """
+        <div class="sidebar-link-box">
+            📚 <a href="https://drive.google.com/drive/folders/1t0-cqQjqLRbiexGowbBqmmQDoe3RMG2I?usp=sharing" target="_blank">
+            Referências
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="sidebar-link-box">
+            📁 <a href="https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing" target="_blank">
+            Documentos controlados
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if st.session_state.pagina == "selecao":
         st.divider()
         st.subheader("🔑 Central de Acessos")
@@ -324,26 +326,26 @@ if st.session_state.pagina == "selecao":
         unsafe_allow_html=True
     )
 
-    c1, c2, c3 = st.columns(3)
+    col_centro_1, col_centro_2, col_centro_3, col_centro_4, col_centro_5 = st.columns([1, 1.2, 1.2, 1.2, 1])
 
-    with c1:
+    with col_centro_2:
         if st.button("Teste de Meia-Vida", use_container_width=True):
             ir_para_cadastro("Meia-Vida")
-        st.caption("Avalia o tempo de decaimento da espuma.")
+        st.markdown('<div class="subtexto-card">Avalia o tempo de decaimento da espuma.</div>', unsafe_allow_html=True)
 
-    with c2:
+    with col_centro_3:
         if st.button("Teste de Granulometria", use_container_width=True):
             ir_para_cadastro("Granulometria")
-        st.caption("Mede a distribuição do tamanho das bolhas.")
+        st.markdown('<div class="subtexto-card">Mede a distribuição do tamanho das bolhas.</div>', unsafe_allow_html=True)
 
-    with c3:
+    with col_centro_4:
         if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
             ir_para_cadastro("Estabilidade Dinâmica")
-        st.caption("Verifica a resistência estrutural da espuma.")
+        st.markdown('<div class="subtexto-card">Verifica a resistência estrutural da espuma.</div>', unsafe_allow_html=True)
 
 
 elif st.session_state.pagina == "cadastro":
-    st.subheader(f"Ficha de Cadastro: {st.session_state.tipo_selecionado}")
+    st.markdown(f"# Ficha de Cadastro: {st.session_state.tipo_selecionado}")
 
     if st.button("⬅️ Voltar ao Menu Principal"):
         st.session_state.pagina = "selecao"
