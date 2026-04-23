@@ -1,6 +1,8 @@
 import os
 import io
 import uuid
+import base64
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
@@ -220,6 +222,50 @@ def get_mime_type(uploaded_file, extensao):
     return mime_type
 
 
+def carregar_logo_msb_base64() -> str:
+    caminhos_possiveis = [
+        "logo_msb.png",
+        "msb_logo.png",
+        "assets/logo_msb.png",
+        "assets/msb_logo.png",
+        "images/logo_msb.png",
+        "images/msb_logo.png",
+    ]
+
+    for caminho in caminhos_possiveis:
+        p = Path(caminho)
+        if p.exists() and p.is_file():
+            with open(p, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            return f"data:image/png;base64,{data}"
+
+    return ""
+
+
+def render_banner_bfoam():
+    logo_base64 = carregar_logo_msb_base64()
+
+    if logo_base64:
+        logo_html = f'<img src="{logo_base64}" class="banner-logo" alt="Logo MSB">'
+    else:
+        logo_html = '<div class="banner-logo-placeholder">MSB</div>'
+
+    st.markdown(
+        f"""
+        <div class="banner-topo">
+            <div class="banner-logo-area">
+                {logo_html}
+            </div>
+            <div class="banner-texto">
+                <div class="banner-titulo">B_Foam</div>
+                <div class="banner-subtitulo">Engenharia MSB - Plataforma de Análise</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ============================================================
 # CSS E ESTILIZAÇÃO
 # ============================================================
@@ -227,18 +273,18 @@ st.markdown("""
 <style>
     .titulo-amarelo {
         color: #FFD700;
-        font-size: 3.2em;
+        font-size: 2.2em;
         font-weight: bold;
         text-align: center;
-        margin: 20px 0 10px 0;
+        margin: 10px 0 20px 0;
     }
 
     .subtexto-card {
         color: #B9D1EA;
-        font-size: 0.8em;
-        margin-top: 6px;
+        font-size: 0.95em;
+        margin-top: 8px;
         line-height: 1.35;
-        text-align: left;
+        text-align: center;
     }
 
     .sidebar-link-box {
@@ -258,6 +304,68 @@ st.markdown("""
     .sidebar-link-box a:hover {
         color: #FFFFFF !important;
         text-decoration: underline;
+    }
+
+    .banner-topo {
+        width: 100%;
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 18px 26px;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        margin: 6px 0 24px 0;
+    }
+
+    .banner-logo-area {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 110px;
+    }
+
+    .banner-logo {
+        max-height: 78px;
+        max-width: 120px;
+        object-fit: contain;
+    }
+
+    .banner-logo-placeholder {
+        width: 88px;
+        height: 88px;
+        border-radius: 16px;
+        background: #E9EEF6;
+        color: #0A2A66;
+        font-weight: bold;
+        font-size: 1.5em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .banner-texto {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+
+    .banner-titulo {
+        color: #0A2A66;
+        font-size: 2.4em;
+        font-weight: 800;
+        line-height: 1.0;
+        margin-bottom: 6px;
+    }
+
+    .banner-subtitulo {
+        color: #24456F;
+        font-size: 1.05em;
+        font-weight: 600;
+    }
+
+    .bloco-selecao {
+        margin-top: 18px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -321,27 +429,42 @@ with st.sidebar:
 # TELAS
 # ============================================================
 if st.session_state.pagina == "selecao":
+    render_banner_bfoam()
+
     st.markdown(
         '<p class="titulo-amarelo">Selecione o tipo de análise:</p>',
         unsafe_allow_html=True
     )
 
-    col_centro_1, col_centro_2, col_centro_3, col_centro_4, col_centro_5 = st.columns([1, 1.2, 1.2, 1.2, 1])
+    st.markdown('<div class="bloco-selecao">', unsafe_allow_html=True)
 
-    with col_centro_2:
+    col_esq, col1, col2, col3, col_dir = st.columns([1, 1.2, 1.2, 1.2, 1])
+
+    with col1:
         if st.button("Teste de Meia-Vida", use_container_width=True):
             ir_para_cadastro("Meia-Vida")
-        st.markdown('<div class="subtexto-card">Avalia o tempo de decaimento da espuma.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="subtexto-card">Avalia o tempo de decaimento da espuma.</div>',
+            unsafe_allow_html=True
+        )
 
-    with col_centro_3:
+    with col2:
         if st.button("Teste de Granulometria", use_container_width=True):
             ir_para_cadastro("Granulometria")
-        st.markdown('<div class="subtexto-card">Mede a distribuição do tamanho das bolhas.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="subtexto-card">Mede a distribuição do tamanho das bolhas.</div>',
+            unsafe_allow_html=True
+        )
 
-    with col_centro_4:
+    with col3:
         if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
             ir_para_cadastro("Estabilidade Dinâmica")
-        st.markdown('<div class="subtexto-card">Verifica a resistência estrutural da espuma.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="subtexto-card">Verifica a resistência estrutural da espuma.</div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 elif st.session_state.pagina == "cadastro":
