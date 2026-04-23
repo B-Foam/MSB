@@ -33,28 +33,155 @@ LOGO_PATH = "logo_msb.png"
 
 
 # ============================================================
+# CSS GLOBAL
+# ============================================================
+st.markdown("""
+<style>
+    .titulo-amarelo {
+        color: #FFD700;
+        font-size: 2.2em;
+        font-weight: bold;
+        text-align: center;
+        margin: 10px 0 20px 0;
+    }
+
+    .subtexto-card {
+        color: #B9D1EA;
+        font-size: 0.95em;
+        margin-top: 8px;
+        line-height: 1.35;
+        text-align: center;
+    }
+
+    .sidebar-link-box {
+        border: 1px solid #2E7BCF;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-top: 10px;
+        background-color: rgba(255,255,255,0.02);
+    }
+
+    .sidebar-link-box a {
+        color: #B9D1EA !important;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .sidebar-link-box a:hover {
+        color: #FFFFFF !important;
+        text-decoration: underline;
+    }
+
+    .banner-topo {
+        width: 100%;
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 18px 26px;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        margin: 6px 0 24px 0;
+    }
+
+    .banner-logo-area {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 110px;
+    }
+
+    .banner-logo {
+        max-height: 78px;
+        max-width: 120px;
+        object-fit: contain;
+    }
+
+    .banner-logo-placeholder {
+        width: 88px;
+        height: 88px;
+        border-radius: 16px;
+        background: #E9EEF6;
+        color: #0A2A66;
+        font-weight: bold;
+        font-size: 1.5em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .banner-texto {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+
+    .banner-titulo {
+        color: #0A2A66;
+        font-size: 2.4em;
+        font-weight: 800;
+        line-height: 1.0;
+        margin-bottom: 6px;
+    }
+
+    .banner-subtitulo {
+        color: #24456F;
+        font-size: 1.05em;
+        font-weight: 600;
+    }
+
+    .bloco-selecao {
+        margin-top: 18px;
+    }
+
+    .login-wrapper {
+        min-height: 80vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .login-box {
+        width: 100%;
+        max-width: 520px;
+        margin: 40px auto;
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 28px 30px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        text-align: center;
+    }
+
+    .login-title {
+        color: #0A2A66;
+        font-size: 2em;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .login-subtitle {
+        color: #35557C;
+        font-size: 1em;
+        font-weight: 500;
+        margin-bottom: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
 # CONTROLE DE ACESSO POR SENHA
 # ============================================================
 def get_app_password():
     return (
         st.secrets.get("APP_PASSWORD")
+        or st.secrets.get("app", {}).get("APP_PASSWORD")
         or os.getenv("APP_PASSWORD")
     )
 
 
-def garantir_login():
-    if "app_autenticado" not in st.session_state:
-        st.session_state.app_autenticado = False
-
-    senha_correta = get_app_password()
-
-    if not senha_correta:
-        st.error("APP_PASSWORD não configurada nos secrets.")
-        st.stop()
-
-    if st.session_state.app_autenticado:
-        return
-
+def render_login_page():
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="login-box">
@@ -70,14 +197,26 @@ def garantir_login():
         entrar = st.form_submit_button("Entrar")
 
         if entrar:
-            if senha == senha_correta:
+            senha_correta = get_app_password()
+
+            if not senha_correta:
+                st.error("APP_PASSWORD não configurada nos secrets.")
+            elif senha == senha_correta:
                 st.session_state.app_autenticado = True
-                st.success("Acesso liberado.")
                 st.rerun()
             else:
                 st.error("Senha incorreta.")
 
-    st.stop()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def garantir_login_total():
+    if "app_autenticado" not in st.session_state:
+        st.session_state.app_autenticado = False
+
+    if not st.session_state.app_autenticado:
+        render_login_page()
+        st.stop()
 
 
 # ============================================================
@@ -317,135 +456,6 @@ def render_banner_bfoam():
 
 
 # ============================================================
-# CSS E ESTILIZAÇÃO
-# ============================================================
-st.markdown("""
-<style>
-    .titulo-amarelo {
-        color: #FFD700;
-        font-size: 2.2em;
-        font-weight: bold;
-        text-align: center;
-        margin: 10px 0 20px 0;
-    }
-
-    .subtexto-card {
-        color: #B9D1EA;
-        font-size: 0.95em;
-        margin-top: 8px;
-        line-height: 1.35;
-        text-align: center;
-    }
-
-    .sidebar-link-box {
-        border: 1px solid #2E7BCF;
-        border-radius: 10px;
-        padding: 10px 12px;
-        margin-top: 10px;
-        background-color: rgba(255,255,255,0.02);
-    }
-
-    .sidebar-link-box a {
-        color: #B9D1EA !important;
-        text-decoration: none;
-        font-weight: 600;
-    }
-
-    .sidebar-link-box a:hover {
-        color: #FFFFFF !important;
-        text-decoration: underline;
-    }
-
-    .banner-topo {
-        width: 100%;
-        background: #FFFFFF;
-        border-radius: 18px;
-        padding: 18px 26px;
-        display: flex;
-        align-items: center;
-        gap: 22px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        margin: 6px 0 24px 0;
-    }
-
-    .banner-logo-area {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 110px;
-    }
-
-    .banner-logo {
-        max-height: 78px;
-        max-width: 120px;
-        object-fit: contain;
-    }
-
-    .banner-logo-placeholder {
-        width: 88px;
-        height: 88px;
-        border-radius: 16px;
-        background: #E9EEF6;
-        color: #0A2A66;
-        font-weight: bold;
-        font-size: 1.5em;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .banner-texto {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-
-    .banner-titulo {
-        color: #0A2A66;
-        font-size: 2.4em;
-        font-weight: 800;
-        line-height: 1.0;
-        margin-bottom: 6px;
-    }
-
-    .banner-subtitulo {
-        color: #24456F;
-        font-size: 1.05em;
-        font-weight: 600;
-    }
-
-    .bloco-selecao {
-        margin-top: 18px;
-    }
-
-    .login-box {
-        width: 100%;
-        max-width: 520px;
-        margin: 60px auto 20px auto;
-        background: #FFFFFF;
-        border-radius: 18px;
-        padding: 24px 28px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        text-align: center;
-    }
-
-    .login-title {
-        color: #0A2A66;
-        font-size: 2em;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-
-    .login-subtitle {
-        color: #35557C;
-        font-size: 1em;
-        font-weight: 500;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ============================================================
 # NAVEGAÇÃO
 # ============================================================
 if "pagina" not in st.session_state:
@@ -455,6 +465,12 @@ if "pagina" not in st.session_state:
 def ir_para_cadastro(tipo):
     st.session_state.pagina = "cadastro"
     st.session_state.tipo_selecionado = tipo
+
+
+# ============================================================
+# LOGIN TOTAL ANTES DE TUDO
+# ============================================================
+garantir_login_total()
 
 
 # ============================================================
@@ -498,18 +514,15 @@ with st.sidebar:
             **Senha**: `Bfoam-50`
             """)
 
-    if st.session_state.get("app_autenticado", False):
-        st.divider()
-        if st.button("Encerrar sessão"):
-            st.session_state.app_autenticado = False
-            st.rerun()
+    st.divider()
+    if st.button("Encerrar sessão"):
+        st.session_state.app_autenticado = False
+        st.rerun()
 
 
 # ============================================================
-# MAIN
+# TELAS
 # ============================================================
-garantir_login()
-
 if st.session_state.pagina == "selecao":
     render_banner_bfoam()
 
