@@ -1,6 +1,7 @@
 import requests
 import streamlit as st
 from consulta_imagens import render_consulta_imagens
+from resultados_granulometria import render_resultados_granulometria
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -334,7 +335,7 @@ elif st.session_state.pagina == "cadastro":
     )
 
     with tab_res:
-        st.info("Aqui serão exibidos os resultados das análises.")
+        render_resultados_granulometria(st.session_state)
 
     with tab_cad:
         with st.container(border=True):
