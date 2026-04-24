@@ -11,6 +11,7 @@ from supabase import create_client, Client
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
+from manufatura import render_manufatura
 
 from consulta_imagens import render_consulta_imagens
 from resultados_granulometria import render_resultados_granulometria
@@ -499,7 +500,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    st.markdown(
+       st.markdown(
         """
         <div class="sidebar-link-box">
             📁 <a href="https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing" target="_blank">
@@ -508,6 +509,11 @@ with st.sidebar:
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+    if st.button("🏭 Manufatura", use_container_width=True):
+        st.session_state.pagina = "manufatura"
+        st.rerun()
     )
 
     if st.session_state.pagina == "selecao":
@@ -716,3 +722,5 @@ elif st.session_state.pagina == "cadastro":
                         st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
                     else:
                         st.error("O arquivo não foi salvo no Drive.")
+        elif st.session_state.pagina == "manufatura":
+    render_manufatura()
