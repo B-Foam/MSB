@@ -500,7 +500,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-       st.markdown(
+          st.markdown(
         """
         <div class="sidebar-link-box">
             📁 <a href="https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing" target="_blank">
@@ -514,7 +514,7 @@ with st.sidebar:
     if st.button("🏭 Manufatura", use_container_width=True):
         st.session_state.pagina = "manufatura"
         st.rerun()
-    )
+    
 
     if st.session_state.pagina == "selecao":
         st.divider()
