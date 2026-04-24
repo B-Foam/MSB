@@ -722,5 +722,5 @@ elif st.session_state.pagina == "cadastro":
                         st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
                     else:
                         st.error("O arquivo não foi salvo no Drive.")
-        elif st.session_state.pagina == "manufatura":
+elif st.session_state.pagina == "manufatura":
     render_manufatura()
