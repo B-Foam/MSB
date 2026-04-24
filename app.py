@@ -500,7 +500,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-          st.markdown(
+    st.markdown(
         """
         <div class="sidebar-link-box">
             📁 <a href="https://drive.google.com/drive/folders/1wfb24h6WLPPMqBnG2FT1jwBbA_bQKGTV?usp=sharing" target="_blank">
@@ -514,7 +514,6 @@ with st.sidebar:
     if st.button("🏭 Manufatura", use_container_width=True):
         st.session_state.pagina = "manufatura"
         st.rerun()
-    
 
     if st.session_state.pagina == "selecao":
         st.divider()
@@ -573,6 +572,10 @@ if st.session_state.pagina == "selecao":
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+elif st.session_state.pagina == "manufatura":
+    render_manufatura()
+
+
 elif st.session_state.pagina == "cadastro":
     st.markdown(f"# Ficha de Cadastro: {st.session_state.tipo_selecionado}")
 
@@ -615,7 +618,10 @@ elif st.session_state.pagina == "cadastro":
 
                 outro_dispositivo = ""
                 if dispositivo == "Outros":
-                    outro_dispositivo = st.text_input("Especifique o dispositivo:", key="gran_outro_disp")
+                    outro_dispositivo = st.text_input(
+                        "Especifique o dispositivo:",
+                        key="gran_outro_disp"
+                    )
 
                 uploaded_file = st.file_uploader(
                     "Escolha a imagem do teste:",
@@ -639,8 +645,6 @@ elif st.session_state.pagina == "cadastro":
                                 uploaded_file=uploaded_file,
                                 outro_dispositivo=outro_dispositivo,
                             )
-
-                            mime_type = get_mime_type(uploaded_file, extensao)
 
                             with st.spinner("Salvando no Supabase..."):
                                 path_salvo, erro = upload_imagem_supabase(
@@ -722,5 +726,3 @@ elif st.session_state.pagina == "cadastro":
                         st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
                     else:
                         st.error("O arquivo não foi salvo no Drive.")
-elif st.session_state.pagina == "manufatura":
-    render_manufatura()
