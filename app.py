@@ -187,37 +187,36 @@ st.markdown("""
        ============================================================ */
 
     .banner-topo {
-        width: 100%;
-        background: #FFFFFF;
-        border-radius: 0 0 18px 18px;
-        padding: 14px 24px !important;
-        min-height: 96px;
-        display: flex;
-        align-items: center;
-        gap: 20px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        margin: 0 0 14px 0 !important;
-        overflow: visible !important;
-    }
+    width: 100%;
+    background: #FFFFFF;
+    border-radius: 0 0 18px 18px;
+    padding: 24px 28px !important;
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+    margin: 0 0 18px 0 !important;
+    overflow: visible !important;
+}
 
     .banner-logo-area {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 145px;
-        height: 72px;
-        overflow: visible !important;
-    }
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 180px;
+    height: 105px;
+    overflow: visible !important;
+}
 
-    .banner-logo {
-        max-height: 72px !important;
-        max-width: 145px !important;
-        width: auto !important;
-        height: auto !important;
-        object-fit: contain !important;
-        display: block;
-    }
-
+.banner-logo {
+    max-height: 105px !important;
+    max-width: 180px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    display: block;
+}
     .banner-texto {
         display: flex;
         flex-direction: column;
