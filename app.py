@@ -580,8 +580,9 @@ elif st.session_state.pagina == "cadastro":
     st.markdown(f"# Ficha de Cadastro: {st.session_state.tipo_selecionado}")
 
     if st.button("⬅️ Voltar ao Menu Principal"):
-        st.session_state.pagina = "selecao"
-        st.rerun()
+    st.session_state.pagina = "selecao"
+    st.session_state.confirmou_cadastro_imagem = False
+    st.rerun()
 
     if st.session_state.tipo_selecionado == "Granulometria":
         aba_resultados, aba_cadastro_img, aba_consulta = st.tabs(
@@ -592,9 +593,43 @@ elif st.session_state.pagina == "cadastro":
             render_resultados_granulometria(listar_resultados_granulometria_supabase)
 
         with aba_cadastro_img:
-            st.markdown("### Cadastrar Nova Imagem")
+    st.markdown("### Cadastrar Nova Imagem")
 
-            with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
+    # ============================================================
+    # AVISO DE CONFIRMAÇÃO ANTES DO CADASTRO DE IMAGEM
+    # ============================================================
+    if "confirmou_cadastro_imagem" not in st.session_state:
+        st.session_state.confirmou_cadastro_imagem = False
+
+    if not st.session_state.confirmou_cadastro_imagem:
+        st.warning(
+            "⚠️ Área exclusiva para testes de imagens. "
+            "O cadastro de uma nova imagem irá adicionar um novo registro ao sistema."
+        )
+
+        st.info("Você realmente deseja cadastrar uma nova imagem?")
+
+        col_aviso1, col_aviso2 = st.columns([1, 1])
+
+        with col_aviso1:
+            if st.button("✅ Sim, desejo cadastrar", use_container_width=True):
+                st.session_state.confirmou_cadastro_imagem = True
+                st.rerun()
+
+        with col_aviso2:
+            if st.button("⬅️ Não, voltar", use_container_width=True):
+                st.session_state.pagina = "selecao"
+                st.rerun()
+
+        st.stop()
+
+    st.success("Acesso liberado para cadastro de imagem.")
+
+    if st.button("🔒 Cancelar cadastro / bloquear novamente"):
+        st.session_state.confirmou_cadastro_imagem = False
+        st.rerun()
+
+    with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
                 amostra = st.text_input("Amostra (ex: 001)", key="gran_amostra")
                 teste = st.text_input("Teste (ex: 001)", key="gran_teste")
                 tempo = st.number_input(
