@@ -2,16 +2,15 @@ import os
 import io
 import uuid
 import base64
+import streamlit as st
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-
-import streamlit as st
 from supabase import create_client, Client
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
-
+from manutencao import verificar_manutencao
 from manufatura import render_manufatura
 from consulta_imagens import render_consulta_imagens
 from resultados_granulometria import render_resultados_granulometria
@@ -30,6 +29,7 @@ st.set_page_config(
     layout="wide",
 )
 
+verificar_manutencao()
 LOGO_PATH = "logo-msb.png"
 
 
