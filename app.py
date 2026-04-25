@@ -11,8 +11,8 @@ from supabase import create_client, Client
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
-from manufatura import render_manufatura
 
+from manufatura import render_manufatura
 from consulta_imagens import render_consulta_imagens
 from resultados_granulometria import render_resultados_granulometria
 from supabase_resultados import (
@@ -179,16 +179,17 @@ def get_app_password():
 
 def carregar_logo_msb_base64() -> str:
     caminhos_possiveis = [
-        LOGO_PATH,        
+        LOGO_PATH,
         "logo-msb.png",
-       
     ]
 
     for caminho in caminhos_possiveis:
         p = Path(caminho)
+
         if p.exists() and p.is_file():
             sufixo = p.suffix.lower()
             mime = "image/png"
+
             if sufixo in [".jpg", ".jpeg"]:
                 mime = "image/jpeg"
 
@@ -363,20 +364,26 @@ def listar_imagens_supabase(prefixo: str = "") -> Tuple[List[Dict], Optional[str
         supabase = get_supabase_client()
         bucket = get_bucket_name()
 
-        resposta = supabase.storage.from_(bucket).list(path=prefixo if prefixo else "")
+        resposta = supabase.storage.from_(bucket).list(
+            path=prefixo if prefixo else ""
+        )
 
         if resposta is None:
             return [], None
 
         imagens = []
+
         for item in resposta:
             nome = item.get("name")
+
             if not nome:
                 continue
 
             nome_lower = nome.lower()
+
             if nome_lower.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")):
                 path_completo = f"{prefixo}/{nome}" if prefixo else nome
+
                 imagens.append(
                     {
                         "name": nome,
@@ -386,6 +393,7 @@ def listar_imagens_supabase(prefixo: str = "") -> Tuple[List[Dict], Optional[str
                 )
 
         imagens = sorted(imagens, key=lambda x: x["name"].lower())
+
         return imagens, None
 
     except Exception as e:
@@ -395,6 +403,7 @@ def listar_imagens_supabase(prefixo: str = "") -> Tuple[List[Dict], Optional[str
 def montar_url_publica(caminho_arquivo: str) -> str:
     supabase = get_supabase_client()
     bucket = get_bucket_name()
+
     return supabase.storage.from_(bucket).get_public_url(caminho_arquivo)
 
 
@@ -433,11 +442,20 @@ def upload_imagem_supabase(file_obj, nome_destino: Optional[str] = None) -> Tupl
 # ============================================================
 # AUXILIARES
 # ============================================================
-def montar_nome_arquivo(amostra, teste, tempo, concentracao, dispositivo, uploaded_file, outro_dispositivo=""):
+def montar_nome_arquivo(
+    amostra,
+    teste,
+    tempo,
+    concentracao,
+    dispositivo,
+    uploaded_file,
+    outro_dispositivo=""
+):
     c_clean = concentracao.replace(",", "").replace("%", "")
     disp_final = outro_dispositivo if dispositivo == "Outros" else dispositivo
 
     extensao = uploaded_file.name.split(".")[-1].lower()
+
     if extensao == "jpg":
         extensao = "jpeg"
 
@@ -448,16 +466,19 @@ def montar_nome_arquivo(amostra, teste, tempo, concentracao, dispositivo, upload
         f"{c_clean}_"
         f"{disp_final}.{extensao}"
     )
+
     return nome_final, extensao, disp_final
 
 
 def get_mime_type(uploaded_file, extensao):
     mime_type = uploaded_file.type
+
     if not mime_type:
         if extensao == "png":
             mime_type = "image/png"
         else:
             mime_type = "image/jpeg"
+
     return mime_type
 
 
@@ -471,6 +492,9 @@ if "pagina" not in st.session_state:
 def ir_para_cadastro(tipo):
     st.session_state.pagina = "cadastro"
     st.session_state.tipo_selecionado = tipo
+
+    if tipo != "Granulometria":
+        st.session_state.confirmou_cadastro_imagem = False
 
 
 # ============================================================
@@ -513,11 +537,13 @@ with st.sidebar:
 
     if st.button("🏭 Manufatura", use_container_width=True):
         st.session_state.pagina = "manufatura"
+        st.session_state.confirmou_cadastro_imagem = False
         st.rerun()
 
     if st.session_state.pagina == "selecao":
         st.divider()
         st.subheader("🔑 Central de Acessos")
+
         with st.expander("Clique aqui para ver acessos"):
             st.markdown("""
             **E-mail**: `msbbfoam@gmail.com`  
@@ -525,8 +551,10 @@ with st.sidebar:
             """)
 
     st.divider()
+
     if st.button("Encerrar sessão"):
         st.session_state.app_autenticado = False
+        st.session_state.confirmou_cadastro_imagem = False
         st.rerun()
 
 
@@ -548,6 +576,8 @@ if st.session_state.pagina == "selecao":
     with col1:
         if st.button("Teste de Meia-Vida", use_container_width=True):
             ir_para_cadastro("Meia-Vida")
+            st.rerun()
+
         st.markdown(
             '<div class="subtexto-card">Avalia o tempo de decaimento da espuma.</div>',
             unsafe_allow_html=True
@@ -556,6 +586,8 @@ if st.session_state.pagina == "selecao":
     with col2:
         if st.button("Teste de Granulometria", use_container_width=True):
             ir_para_cadastro("Granulometria")
+            st.rerun()
+
         st.markdown(
             '<div class="subtexto-card">Mede a distribuição do tamanho das bolhas.</div>',
             unsafe_allow_html=True
@@ -564,6 +596,8 @@ if st.session_state.pagina == "selecao":
     with col3:
         if st.button("Teste de Estabilidade Dinâmica", use_container_width=True):
             ir_para_cadastro("Estabilidade Dinâmica")
+            st.rerun()
+
         st.markdown(
             '<div class="subtexto-card">Verifica a resistência estrutural da espuma.</div>',
             unsafe_allow_html=True
@@ -580,9 +614,9 @@ elif st.session_state.pagina == "cadastro":
     st.markdown(f"# Ficha de Cadastro: {st.session_state.tipo_selecionado}")
 
     if st.button("⬅️ Voltar ao Menu Principal"):
-    st.session_state.pagina = "selecao"
-    st.session_state.confirmou_cadastro_imagem = False
-    st.rerun()
+        st.session_state.pagina = "selecao"
+        st.session_state.confirmou_cadastro_imagem = False
+        st.rerun()
 
     if st.session_state.tipo_selecionado == "Granulometria":
         aba_resultados, aba_cadastro_img, aba_consulta = st.tabs(
@@ -590,48 +624,52 @@ elif st.session_state.pagina == "cadastro":
         )
 
         with aba_resultados:
-            render_resultados_granulometria(listar_resultados_granulometria_supabase)
+            render_resultados_granulometria(
+                listar_resultados_granulometria_supabase
+            )
 
         with aba_cadastro_img:
-    st.markdown("### Cadastrar Nova Imagem")
+            st.markdown("### Cadastrar Nova Imagem")
 
-    # ============================================================
-    # AVISO DE CONFIRMAÇÃO ANTES DO CADASTRO DE IMAGEM
-    # ============================================================
-    if "confirmou_cadastro_imagem" not in st.session_state:
-        st.session_state.confirmou_cadastro_imagem = False
+            # ============================================================
+            # AVISO DE CONFIRMAÇÃO ANTES DO CADASTRO DE IMAGEM
+            # ============================================================
+            if "confirmou_cadastro_imagem" not in st.session_state:
+                st.session_state.confirmou_cadastro_imagem = False
 
-    if not st.session_state.confirmou_cadastro_imagem:
-        st.warning(
-            "⚠️ Área exclusiva para testes de imagens. "
-            "O cadastro de uma nova imagem irá adicionar um novo registro ao sistema."
-        )
+            if not st.session_state.confirmou_cadastro_imagem:
+                st.warning(
+                    "⚠️ Área exclusiva para testes de imagens. "
+                    "O cadastro de uma nova imagem irá adicionar um novo registro ao sistema."
+                )
 
-        st.info("Você realmente deseja cadastrar uma nova imagem?")
+                st.info("Você realmente deseja cadastrar uma nova imagem?")
 
-        col_aviso1, col_aviso2 = st.columns([1, 1])
+                col_aviso1, col_aviso2 = st.columns([1, 1])
 
-        with col_aviso1:
-            if st.button("✅ Sim, desejo cadastrar", use_container_width=True):
-                st.session_state.confirmou_cadastro_imagem = True
+                with col_aviso1:
+                    if st.button("✅ Sim, desejo cadastrar", use_container_width=True):
+                        st.session_state.confirmou_cadastro_imagem = True
+                        st.rerun()
+
+                with col_aviso2:
+                    if st.button("⬅️ Não, voltar", use_container_width=True):
+                        st.session_state.pagina = "selecao"
+                        st.session_state.confirmou_cadastro_imagem = False
+                        st.rerun()
+
+                st.stop()
+
+            st.success("Acesso liberado para cadastro de imagem.")
+
+            if st.button("🔒 Cancelar cadastro / bloquear novamente"):
+                st.session_state.confirmou_cadastro_imagem = False
                 st.rerun()
 
-        with col_aviso2:
-            if st.button("⬅️ Não, voltar", use_container_width=True):
-                st.session_state.pagina = "selecao"
-                st.rerun()
-
-        st.stop()
-
-    st.success("Acesso liberado para cadastro de imagem.")
-
-    if st.button("🔒 Cancelar cadastro / bloquear novamente"):
-        st.session_state.confirmou_cadastro_imagem = False
-        st.rerun()
-
-    with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
+            with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
                 amostra = st.text_input("Amostra (ex: 001)", key="gran_amostra")
                 teste = st.text_input("Teste (ex: 001)", key="gran_teste")
+
                 tempo = st.number_input(
                     "Tempo de estabilidade (segundos)",
                     min_value=0,
@@ -652,6 +690,7 @@ elif st.session_state.pagina == "cadastro":
                 )
 
                 outro_dispositivo = ""
+
                 if dispositivo == "Outros":
                     outro_dispositivo = st.text_input(
                         "Especifique o dispositivo:",
@@ -690,7 +729,9 @@ elif st.session_state.pagina == "cadastro":
                             if erro:
                                 st.error(f"Erro ao salvar no Supabase: {erro}")
                             else:
-                                st.success(f"Arquivo salvo com sucesso! Nome: {path_salvo}")
+                                st.success(
+                                    f"Arquivo salvo com sucesso! Nome: {path_salvo}"
+                                )
 
                         except Exception as e:
                             st.error(f"Erro no cadastro da imagem: {e}")
@@ -707,6 +748,7 @@ elif st.session_state.pagina == "cadastro":
         with st.form("form_novo_teste", clear_on_submit=True):
             amostra = st.text_input("Amostra (ex: 001)")
             teste = st.text_input("Teste (ex: 001)")
+
             tempo = st.number_input(
                 "Tempo de estabilidade (segundos)",
                 min_value=0,
@@ -724,6 +766,7 @@ elif st.session_state.pagina == "cadastro":
             )
 
             outro_dispositivo = ""
+
             if dispositivo == "Outros":
                 outro_dispositivo = st.text_input("Especifique o dispositivo:")
 
