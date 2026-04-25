@@ -30,7 +30,7 @@ st.set_page_config(
     layout="wide",
 )
 
-LOGO_PATH = "logo_msb.png"
+LOGO_PATH = "logo-msb.png"
 
 
 # ============================================================
@@ -38,200 +38,107 @@ LOGO_PATH = "logo_msb.png"
 # ============================================================
 st.markdown("""
 <style>
-    .titulo-amarelo {
-        color: #FFD700;
-        font-size: 1.7em !important;
-        font-weight: bold;
-        text-align: center;
-        margin: 6px 0 14px 0 !important;
-    }
-
-    .subtexto-card {
-        color: #B9D1EA;
-        font-size: 0.85em;
-        margin-top: 6px;
-        line-height: 1.25;
-        text-align: center;
-    }
-
-    .sidebar-link-box {
-        border: 1px solid #2E7BCF;
-        border-radius: 10px;
-        padding: 8px 10px;
-        margin-top: 8px;
-        background-color: rgba(255,255,255,0.02);
-    }
-
-    .sidebar-link-box a {
-        color: #B9D1EA !important;
-        text-decoration: none;
-        font-weight: 600;
-        font-size: 0.9rem !important;
-    }
-
-    .sidebar-link-box a:hover {
-        color: #FFFFFF !important;
-        text-decoration: underline;
-    }
-
-    .banner-topo {
-        width: 100%;
-        background: #FFFFFF;
-        border-radius: 16px;
-        padding: 12px 20px !important;
-        display: flex;
-        align-items: center;
-        gap: 18px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        margin: 4px 0 16px 0 !important;
-    }
-
-    .banner-logo-area {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 95px;
-    }
-
-    .banner-logo {
-        max-height: 58px !important;
-        max-width: 110px !important;
-        object-fit: contain;
-        display: block;
-    }
-
-    .banner-texto {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-
-    .banner-titulo {
-        color: #0A2A66;
-        font-size: 1.9em !important;
-        font-weight: 800;
-        line-height: 1.0;
-        margin-bottom: 4px;
-    }
-
-    .banner-subtitulo {
-        color: #24456F;
-        font-size: 0.9em !important;
-        font-weight: 600;
-    }
-
-    .bloco-selecao {
-        margin-top: 12px;
-    }
-
-    .login-wrapper {
-        width: 100%;
-        padding-top: 12px;
-    }
-
-    .login-box {
-        width: 100%;
-        max-width: 500px;
-        margin: 0 auto 14px auto;
-        background: #FFFFFF;
-        border-radius: 16px;
-        padding: 20px 24px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        text-align: center;
-    }
-
-    .login-title {
-        color: #0A2A66;
-        font-size: 1.7em;
-        font-weight: 800;
-        margin-bottom: 6px;
-    }
-
-    .login-subtitle {
-        color: #35557C;
-        font-size: 0.95em;
-        font-weight: 500;
-        margin-bottom: 4px;
-    }
-
-    .login-form-box {
-        width: 100%;
-        max-width: 650px;
-        margin: 0 auto;
-        padding: 14px;
-        border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 12px;
-        background: rgba(255,255,255,0.02);
-    }
-
     /* ============================================================
        COMPACTAÇÃO GLOBAL DO APP
        ============================================================ */
 
     .block-container {
-        padding-top: 1.2rem !important;
-        padding-bottom: 1rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
+        padding-top: 0.8rem !important;
+        padding-bottom: 0.8rem !important;
+        padding-left: 1.6rem !important;
+        padding-right: 1.6rem !important;
         max-width: 100% !important;
     }
 
     h1 {
-        font-size: 2.2rem !important;
-        margin-top: 0.3rem !important;
-        margin-bottom: 0.8rem !important;
-        line-height: 1.15 !important;
+        font-size: 2.0rem !important;
+        margin-top: 0.2rem !important;
+        margin-bottom: 0.6rem !important;
+        line-height: 1.12 !important;
     }
 
     h2 {
-        font-size: 1.65rem !important;
-        margin-top: 0.9rem !important;
-        margin-bottom: 0.55rem !important;
-        line-height: 1.2 !important;
+        font-size: 1.45rem !important;
+        margin-top: 0.7rem !important;
+        margin-bottom: 0.45rem !important;
+        line-height: 1.15 !important;
     }
 
     h3 {
-        font-size: 1.3rem !important;
-        margin-top: 0.7rem !important;
-        margin-bottom: 0.45rem !important;
-        line-height: 1.2 !important;
+        font-size: 1.15rem !important;
+        margin-top: 0.6rem !important;
+        margin-bottom: 0.35rem !important;
+        line-height: 1.15 !important;
     }
 
-    p, label, span, div {
-        font-size: 0.95rem;
+    p, label, span {
+        font-size: 0.88rem !important;
+    }
+
+    .stMarkdown {
+        margin-bottom: 0.25rem !important;
+    }
+
+    [data-testid="stVerticalBlock"] {
+        gap: 0.35rem !important;
+    }
+
+    [data-testid="stHorizontalBlock"] {
+        gap: 0.6rem !important;
     }
 
     .stButton > button {
-        padding: 0.35rem 0.75rem !important;
-        font-size: 0.9rem !important;
-        min-height: 36px !important;
+        padding: 0.28rem 0.65rem !important;
+        font-size: 0.85rem !important;
+        min-height: 32px !important;
         border-radius: 8px !important;
     }
 
     .stTextInput input,
-    .stNumberInput input,
-    .stSelectbox div,
+    .stNumberInput input {
+        font-size: 0.85rem !important;
+        min-height: 34px !important;
+        padding-top: 0.25rem !important;
+        padding-bottom: 0.25rem !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] > div {
+        font-size: 0.85rem !important;
+        min-height: 34px !important;
+    }
+
     .stFileUploader {
-        font-size: 0.9rem !important;
+        font-size: 0.85rem !important;
     }
 
     [data-testid="stImage"] img {
-        max-height: 520px !important;
+        max-height: 460px !important;
         object-fit: contain !important;
     }
 
-    [data-testid="stVerticalBlock"] {
-        gap: 0.45rem !important;
-    }
-
     [data-baseweb="tab"] {
-        font-size: 0.9rem !important;
-        padding: 0.35rem 0.7rem !important;
+        font-size: 0.85rem !important;
+        padding: 0.3rem 0.6rem !important;
     }
 
     [data-baseweb="tab-list"] {
-        gap: 0.25rem !important;
+        gap: 0.2rem !important;
     }
+
+    .stAlert {
+        padding-top: 0.45rem !important;
+        padding-bottom: 0.45rem !important;
+        font-size: 0.88rem !important;
+    }
+
+    hr {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    /* ============================================================
+       SIDEBAR
+       ============================================================ */
 
     section[data-testid="stSidebar"] {
         width: 260px !important;
@@ -240,24 +147,186 @@ st.markdown("""
     section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3 {
-        font-size: 1.1rem !important;
+        font-size: 1.05rem !important;
+        margin-bottom: 0.4rem !important;
     }
 
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span,
     section[data-testid="stSidebar"] div {
-        font-size: 0.88rem !important;
+        font-size: 0.84rem !important;
     }
 
-    .stAlert {
-        padding-top: 0.5rem !important;
-        padding-bottom: 0.5rem !important;
+    section[data-testid="stSidebar"] .stButton > button {
+        font-size: 0.85rem !important;
+        min-height: 34px !important;
     }
 
-    hr {
-        margin-top: 0.6rem !important;
-        margin-bottom: 0.6rem !important;
+    .sidebar-link-box {
+        border: 1px solid #2E7BCF;
+        border-radius: 9px;
+        padding: 8px 10px;
+        margin-top: 7px;
+        background-color: rgba(255,255,255,0.02);
     }
+
+    .sidebar-link-box a {
+        color: #B9D1EA !important;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.86rem !important;
+    }
+
+    .sidebar-link-box a:hover {
+        color: #FFFFFF !important;
+        text-decoration: underline;
+    }
+
+    /* ============================================================
+       BANNER SUPERIOR COM LOGO
+       ============================================================ */
+
+    .banner-topo {
+        width: 100%;
+        background: #FFFFFF;
+        border-radius: 0 0 18px 18px;
+        padding: 14px 24px !important;
+        min-height: 96px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        margin: 0 0 14px 0 !important;
+        overflow: visible !important;
+    }
+
+    .banner-logo-area {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 145px;
+        height: 72px;
+        overflow: visible !important;
+    }
+
+    .banner-logo {
+        max-height: 72px !important;
+        max-width: 145px !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+        display: block;
+    }
+
+    .banner-texto {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        overflow: visible !important;
+    }
+
+    .banner-titulo {
+        color: #0A2A66;
+        font-size: 1.85em !important;
+        font-weight: 800;
+        line-height: 1.0;
+        margin-bottom: 5px;
+    }
+
+    .banner-subtitulo {
+        color: #24456F;
+        font-size: 0.9em !important;
+        font-weight: 600;
+    }
+
+    /* ============================================================
+       TELA INICIAL
+       ============================================================ */
+
+    .titulo-amarelo {
+        color: #FFD700;
+        font-size: 1.55em !important;
+        font-weight: bold;
+        text-align: center;
+        margin: 6px 0 12px 0 !important;
+    }
+
+    .subtexto-card {
+        color: #B9D1EA;
+        font-size: 0.82em !important;
+        margin-top: 5px;
+        line-height: 1.2;
+        text-align: center;
+    }
+
+    .bloco-selecao {
+        margin-top: 10px;
+    }
+
+    /* ============================================================
+       LOGIN
+       ============================================================ */
+
+    .login-wrapper {
+        width: 100%;
+        padding-top: 10px;
+    }
+
+    .login-box {
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto 12px auto;
+        background: #FFFFFF;
+        border-radius: 16px;
+        padding: 18px 22px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+        text-align: center;
+    }
+
+    .login-title {
+        color: #0A2A66;
+        font-size: 1.55em !important;
+        font-weight: 800;
+        margin-bottom: 5px;
+    }
+
+    .login-subtitle {
+        color: #35557C;
+        font-size: 0.9em !important;
+        font-weight: 500;
+        margin-bottom: 3px;
+    }
+
+    .login-form-box {
+        width: 100%;
+        max-width: 620px;
+        margin: 0 auto;
+        padding: 12px;
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 12px;
+        background: rgba(255,255,255,0.02);
+    }
+
+    /* ============================================================
+       FORMULÁRIOS MAIS COMPACTOS
+       ============================================================ */
+
+    .compact-form-box {
+        max-width: 950px;
+        padding: 12px 16px;
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.015);
+        margin-top: 8px;
+    }
+
+    .compact-title {
+        font-size: 1.05rem !important;
+        font-weight: 700;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.4rem !important;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -277,6 +346,7 @@ def carregar_logo_msb_base64() -> str:
     caminhos_possiveis = [
         LOGO_PATH,
         "logo-msb.png",
+        "logo_msb.png",
     ]
 
     for caminho in caminhos_possiveis:
@@ -587,7 +657,6 @@ def get_mime_type(uploaded_file, extensao):
 if "pagina" not in st.session_state:
     st.session_state.pagina = "selecao"
 
-
 if "confirmou_cadastro_imagem" not in st.session_state:
     st.session_state.confirmou_cadastro_imagem = False
 
@@ -638,7 +707,11 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    if st.button("🏭 Manufatura", use_container_width=True):
+    st.divider()
+
+    st.markdown("### Links de apoio")
+
+    if st.button("🏭 Processo de fabricação", use_container_width=True):
         st.session_state.pagina = "manufatura"
         st.session_state.confirmou_cadastro_imagem = False
         st.rerun()
@@ -674,7 +747,7 @@ if st.session_state.pagina == "selecao":
 
     st.markdown('<div class="bloco-selecao">', unsafe_allow_html=True)
 
-    col_esq, col1, col2, col3, col_dir = st.columns([1, 1.2, 1.2, 1.2, 1])
+    col_esq, col1, col2, col3, col_dir = st.columns([1, 1.1, 1.1, 1.1, 1])
 
     with col1:
         if st.button("Teste de Meia-Vida", use_container_width=True):
@@ -710,10 +783,18 @@ if st.session_state.pagina == "selecao":
 
 
 elif st.session_state.pagina == "manufatura":
+    render_banner_bfoam()
+
+    if st.button("⬅️ Voltar ao Menu Principal"):
+        st.session_state.pagina = "selecao"
+        st.rerun()
+
     render_manufatura()
 
 
 elif st.session_state.pagina == "cadastro":
+    render_banner_bfoam()
+
     st.markdown(f"# Ficha de Cadastro: {st.session_state.tipo_selecionado}")
 
     if st.button("⬅️ Voltar ao Menu Principal"):
@@ -749,7 +830,7 @@ elif st.session_state.pagina == "cadastro":
         # ABA CADASTRAR NOVA IMAGEM
         # ============================================================
         with aba_cadastro_img:
-            st.markdown("### Cadastrar Nova Imagem")
+            st.markdown('<p class="compact-title">Cadastrar Nova Imagem</p>', unsafe_allow_html=True)
 
             if not st.session_state.confirmou_cadastro_imagem:
                 st.warning(
@@ -759,10 +840,10 @@ elif st.session_state.pagina == "cadastro":
 
                 st.info("Você realmente deseja cadastrar uma nova imagem?")
 
-                col_aviso1, col_aviso2 = st.columns([1, 1])
+                col_aviso1, col_aviso2, col_vazio = st.columns([1, 1, 2])
 
                 with col_aviso1:
-                    if st.button("✅ Sim, desejo cadastrar", use_container_width=True):
+                    if st.button("✅ Sim, cadastrar", use_container_width=True):
                         st.session_state.confirmou_cadastro_imagem = True
                         st.rerun()
 
@@ -775,48 +856,74 @@ elif st.session_state.pagina == "cadastro":
             else:
                 st.success("Acesso liberado para cadastro de imagem.")
 
-                if st.button("🔒 Cancelar cadastro / bloquear novamente"):
-                    st.session_state.confirmou_cadastro_imagem = False
-                    st.rerun()
+                col_cancelar, col_vazio = st.columns([1, 3])
+
+                with col_cancelar:
+                    if st.button("🔒 Bloquear cadastro", use_container_width=True):
+                        st.session_state.confirmou_cadastro_imagem = False
+                        st.rerun()
+
+                st.markdown('<div class="compact-form-box">', unsafe_allow_html=True)
 
                 with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
-                    amostra = st.text_input("Amostra (ex: 001)", key="gran_amostra")
-                    teste = st.text_input("Teste (ex: 001)", key="gran_teste")
+                    col1, col2, col3 = st.columns([1, 1, 1])
 
-                    tempo = st.number_input(
-                        "Tempo de estabilidade (segundos)",
-                        min_value=0,
-                        step=1,
-                        key="gran_tempo",
-                    )
+                    with col1:
+                        amostra = st.text_input("Amostra", placeholder="Ex: 001", key="gran_amostra")
 
-                    concentracao = st.selectbox(
-                        "Concentração do Polidocanol",
-                        ["3,00%", "1,00%", "0,50%", "0,25%"],
-                        key="gran_concentracao",
-                    )
+                    with col2:
+                        teste = st.text_input("Teste", placeholder="Ex: 001", key="gran_teste")
 
-                    dispositivo = st.selectbox(
-                        "Dispositivo utilizado",
-                        ["V08", "V09", "V10", "Tessari", "Outros"],
-                        key="gran_dispositivo",
-                    )
+                    with col3:
+                        tempo = st.number_input(
+                            "Tempo de estabilidade (s)",
+                            min_value=0,
+                            step=1,
+                            key="gran_tempo",
+                        )
+
+                    col4, col5, col6 = st.columns([1, 1, 1])
+
+                    with col4:
+                        concentracao = st.selectbox(
+                            "Concentração",
+                            ["3,00%", "1,00%", "0,50%", "0,25%"],
+                            key="gran_concentracao",
+                        )
+
+                    with col5:
+                        dispositivo = st.selectbox(
+                            "Dispositivo",
+                            ["V08", "V09", "V10", "Tessari", "Outros"],
+                            key="gran_dispositivo",
+                        )
 
                     outro_dispositivo = ""
 
-                    if dispositivo == "Outros":
-                        outro_dispositivo = st.text_input(
-                            "Especifique o dispositivo:",
-                            key="gran_outro_disp"
-                        )
+                    with col6:
+                        if dispositivo == "Outros":
+                            outro_dispositivo = st.text_input(
+                                "Outro dispositivo",
+                                key="gran_outro_disp"
+                            )
+                        else:
+                            st.text_input(
+                                "Outro dispositivo",
+                                value="",
+                                disabled=True,
+                                key="gran_outro_disp_disabled"
+                            )
 
                     uploaded_file = st.file_uploader(
-                        "Escolha a imagem do teste:",
+                        "Imagem do teste",
                         type=["png", "jpg", "jpeg"],
                         key="gran_upload_imagem",
                     )
 
-                    submitted = st.form_submit_button("Salvar Registro no Supabase")
+                    col_salvar, col_vazio2 = st.columns([1, 3])
+
+                    with col_salvar:
+                        submitted = st.form_submit_button("Salvar no Supabase", use_container_width=True)
 
                     if submitted:
                         if uploaded_file is None:
@@ -849,38 +956,58 @@ elif st.session_state.pagina == "cadastro":
                             except Exception as e:
                                 st.error(f"Erro no cadastro da imagem: {e}")
 
+                st.markdown('</div>', unsafe_allow_html=True)
+
     else:
+        st.markdown('<div class="compact-form-box">', unsafe_allow_html=True)
+
         with st.form("form_novo_teste", clear_on_submit=True):
-            amostra = st.text_input("Amostra (ex: 001)")
-            teste = st.text_input("Teste (ex: 001)")
+            col1, col2, col3 = st.columns([1, 1, 1])
 
-            tempo = st.number_input(
-                "Tempo de estabilidade (segundos)",
-                min_value=0,
-                step=1
-            )
+            with col1:
+                amostra = st.text_input("Amostra", placeholder="Ex: 001")
 
-            concentracao = st.selectbox(
-                "Concentração do Polidocanol",
-                ["3,00%", "1,00%", "0,50%", "0,25%"]
-            )
+            with col2:
+                teste = st.text_input("Teste", placeholder="Ex: 001")
 
-            dispositivo = st.selectbox(
-                "Dispositivo utilizado",
-                ["V08", "V09", "V10", "Tessari", "Outros"]
-            )
+            with col3:
+                tempo = st.number_input(
+                    "Tempo de estabilidade (s)",
+                    min_value=0,
+                    step=1
+                )
+
+            col4, col5, col6 = st.columns([1, 1, 1])
+
+            with col4:
+                concentracao = st.selectbox(
+                    "Concentração",
+                    ["3,00%", "1,00%", "0,50%", "0,25%"]
+                )
+
+            with col5:
+                dispositivo = st.selectbox(
+                    "Dispositivo",
+                    ["V08", "V09", "V10", "Tessari", "Outros"]
+                )
 
             outro_dispositivo = ""
 
-            if dispositivo == "Outros":
-                outro_dispositivo = st.text_input("Especifique o dispositivo:")
+            with col6:
+                if dispositivo == "Outros":
+                    outro_dispositivo = st.text_input("Outro dispositivo")
+                else:
+                    st.text_input("Outro dispositivo", value="", disabled=True)
 
             uploaded_file = st.file_uploader(
-                "Escolha a imagem do teste:",
+                "Imagem do teste",
                 type=["png", "jpg", "jpeg"]
             )
 
-            submitted = st.form_submit_button("Salvar Registro no Drive")
+            col_salvar, col_vazio = st.columns([1, 3])
+
+            with col_salvar:
+                submitted = st.form_submit_button("Salvar no Drive", use_container_width=True)
 
             if submitted:
                 if uploaded_file is None:
@@ -909,3 +1036,5 @@ elif st.session_state.pagina == "cadastro":
                         st.success(f"Arquivo salvo com sucesso! Nome: {nome_final}")
                     else:
                         st.error("O arquivo não foi salvo no Drive.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
