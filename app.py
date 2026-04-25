@@ -40,25 +40,25 @@ st.markdown("""
 <style>
     .titulo-amarelo {
         color: #FFD700;
-        font-size: 2.2em;
+        font-size: 1.7em !important;
         font-weight: bold;
         text-align: center;
-        margin: 10px 0 20px 0;
+        margin: 6px 0 14px 0 !important;
     }
 
     .subtexto-card {
         color: #B9D1EA;
-        font-size: 0.95em;
-        margin-top: 8px;
-        line-height: 1.35;
+        font-size: 0.85em;
+        margin-top: 6px;
+        line-height: 1.25;
         text-align: center;
     }
 
     .sidebar-link-box {
         border: 1px solid #2E7BCF;
         border-radius: 10px;
-        padding: 10px 12px;
-        margin-top: 10px;
+        padding: 8px 10px;
+        margin-top: 8px;
         background-color: rgba(255,255,255,0.02);
     }
 
@@ -66,6 +66,7 @@ st.markdown("""
         color: #B9D1EA !important;
         text-decoration: none;
         font-weight: 600;
+        font-size: 0.9rem !important;
     }
 
     .sidebar-link-box a:hover {
@@ -76,25 +77,25 @@ st.markdown("""
     .banner-topo {
         width: 100%;
         background: #FFFFFF;
-        border-radius: 18px;
-        padding: 18px 26px;
+        border-radius: 16px;
+        padding: 12px 20px !important;
         display: flex;
         align-items: center;
-        gap: 22px;
+        gap: 18px;
         box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        margin: 6px 0 24px 0;
+        margin: 4px 0 16px 0 !important;
     }
 
     .banner-logo-area {
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 120px;
+        min-width: 95px;
     }
 
     .banner-logo {
-        max-height: 80px;
-        max-width: 140px;
+        max-height: 58px !important;
+        max-width: 110px !important;
         object-fit: contain;
         display: block;
     }
@@ -107,60 +108,155 @@ st.markdown("""
 
     .banner-titulo {
         color: #0A2A66;
-        font-size: 2.4em;
+        font-size: 1.9em !important;
         font-weight: 800;
         line-height: 1.0;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
 
     .banner-subtitulo {
         color: #24456F;
-        font-size: 1.05em;
+        font-size: 0.9em !important;
         font-weight: 600;
     }
 
     .bloco-selecao {
-        margin-top: 18px;
+        margin-top: 12px;
     }
 
     .login-wrapper {
         width: 100%;
-        padding-top: 20px;
+        padding-top: 12px;
     }
 
     .login-box {
         width: 100%;
-        max-width: 520px;
-        margin: 0 auto 18px auto;
+        max-width: 500px;
+        margin: 0 auto 14px auto;
         background: #FFFFFF;
-        border-radius: 18px;
-        padding: 24px 28px;
+        border-radius: 16px;
+        padding: 20px 24px;
         box-shadow: 0 4px 18px rgba(0,0,0,0.12);
         text-align: center;
     }
 
     .login-title {
         color: #0A2A66;
-        font-size: 2em;
+        font-size: 1.7em;
         font-weight: 800;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
     }
 
     .login-subtitle {
         color: #35557C;
-        font-size: 1em;
+        font-size: 0.95em;
         font-weight: 500;
         margin-bottom: 4px;
     }
 
     .login-form-box {
         width: 100%;
-        max-width: 700px;
+        max-width: 650px;
         margin: 0 auto;
-        padding: 16px;
+        padding: 14px;
         border: 1px solid rgba(255,255,255,0.15);
         border-radius: 12px;
         background: rgba(255,255,255,0.02);
+    }
+
+    /* ============================================================
+       COMPACTAÇÃO GLOBAL DO APP
+       ============================================================ */
+
+    .block-container {
+        padding-top: 1.2rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 100% !important;
+    }
+
+    h1 {
+        font-size: 2.2rem !important;
+        margin-top: 0.3rem !important;
+        margin-bottom: 0.8rem !important;
+        line-height: 1.15 !important;
+    }
+
+    h2 {
+        font-size: 1.65rem !important;
+        margin-top: 0.9rem !important;
+        margin-bottom: 0.55rem !important;
+        line-height: 1.2 !important;
+    }
+
+    h3 {
+        font-size: 1.3rem !important;
+        margin-top: 0.7rem !important;
+        margin-bottom: 0.45rem !important;
+        line-height: 1.2 !important;
+    }
+
+    p, label, span, div {
+        font-size: 0.95rem;
+    }
+
+    .stButton > button {
+        padding: 0.35rem 0.75rem !important;
+        font-size: 0.9rem !important;
+        min-height: 36px !important;
+        border-radius: 8px !important;
+    }
+
+    .stTextInput input,
+    .stNumberInput input,
+    .stSelectbox div,
+    .stFileUploader {
+        font-size: 0.9rem !important;
+    }
+
+    [data-testid="stImage"] img {
+        max-height: 520px !important;
+        object-fit: contain !important;
+    }
+
+    [data-testid="stVerticalBlock"] {
+        gap: 0.45rem !important;
+    }
+
+    [data-baseweb="tab"] {
+        font-size: 0.9rem !important;
+        padding: 0.35rem 0.7rem !important;
+    }
+
+    [data-baseweb="tab-list"] {
+        gap: 0.25rem !important;
+    }
+
+    section[data-testid="stSidebar"] {
+        width: 260px !important;
+    }
+
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {
+        font-size: 1.1rem !important;
+    }
+
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div {
+        font-size: 0.88rem !important;
+    }
+
+    .stAlert {
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+    }
+
+    hr {
+        margin-top: 0.6rem !important;
+        margin-bottom: 0.6rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -407,7 +503,10 @@ def montar_url_publica(caminho_arquivo: str) -> str:
     return supabase.storage.from_(bucket).get_public_url(caminho_arquivo)
 
 
-def upload_imagem_supabase(file_obj, nome_destino: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+def upload_imagem_supabase(
+    file_obj,
+    nome_destino: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
     try:
         supabase = get_supabase_client()
         bucket = get_bucket_name()
@@ -487,6 +586,10 @@ def get_mime_type(uploaded_file, extensao):
 # ============================================================
 if "pagina" not in st.session_state:
     st.session_state.pagina = "selecao"
+
+
+if "confirmou_cadastro_imagem" not in st.session_state:
+    st.session_state.confirmou_cadastro_imagem = False
 
 
 def ir_para_cadastro(tipo):
@@ -619,23 +722,34 @@ elif st.session_state.pagina == "cadastro":
         st.rerun()
 
     if st.session_state.tipo_selecionado == "Granulometria":
-        aba_resultados, aba_cadastro_img, aba_consulta = st.tabs(
-            ["📊 Resultados", "➕ Cadastrar Nova Imagem", "🔍 Consultar Imagens"]
+        aba_resultados, aba_consulta, aba_cadastro_img = st.tabs(
+            ["📊 Resultados", "🔍 Consultar Imagens", "➕ Cadastrar Nova Imagem"]
         )
 
+        # ============================================================
+        # ABA RESULTADOS
+        # ============================================================
         with aba_resultados:
             render_resultados_granulometria(
                 listar_resultados_granulometria_supabase
             )
 
+        # ============================================================
+        # ABA CONSULTAR IMAGENS
+        # ============================================================
+        with aba_consulta:
+            render_consulta_imagens(
+                listar_imagens_supabase=listar_imagens_supabase,
+                montar_url_publica=montar_url_publica,
+                session_state=st.session_state,
+                salvar_resultado_teste=salvar_resultado_teste_supabase,
+            )
+
+        # ============================================================
+        # ABA CADASTRAR NOVA IMAGEM
+        # ============================================================
         with aba_cadastro_img:
             st.markdown("### Cadastrar Nova Imagem")
-
-            # ============================================================
-            # AVISO DE CONFIRMAÇÃO ANTES DO CADASTRO DE IMAGEM
-            # ============================================================
-            if "confirmou_cadastro_imagem" not in st.session_state:
-                st.session_state.confirmou_cadastro_imagem = False
 
             if not st.session_state.confirmou_cadastro_imagem:
                 st.warning(
@@ -658,91 +772,82 @@ elif st.session_state.pagina == "cadastro":
                         st.session_state.confirmou_cadastro_imagem = False
                         st.rerun()
 
-                st.stop()
+            else:
+                st.success("Acesso liberado para cadastro de imagem.")
 
-            st.success("Acesso liberado para cadastro de imagem.")
+                if st.button("🔒 Cancelar cadastro / bloquear novamente"):
+                    st.session_state.confirmou_cadastro_imagem = False
+                    st.rerun()
 
-            if st.button("🔒 Cancelar cadastro / bloquear novamente"):
-                st.session_state.confirmou_cadastro_imagem = False
-                st.rerun()
+                with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
+                    amostra = st.text_input("Amostra (ex: 001)", key="gran_amostra")
+                    teste = st.text_input("Teste (ex: 001)", key="gran_teste")
 
-            with st.form("form_nova_imagem_granulometria", clear_on_submit=True):
-                amostra = st.text_input("Amostra (ex: 001)", key="gran_amostra")
-                teste = st.text_input("Teste (ex: 001)", key="gran_teste")
-
-                tempo = st.number_input(
-                    "Tempo de estabilidade (segundos)",
-                    min_value=0,
-                    step=1,
-                    key="gran_tempo",
-                )
-
-                concentracao = st.selectbox(
-                    "Concentração do Polidocanol",
-                    ["3,00%", "1,00%", "0,50%", "0,25%"],
-                    key="gran_concentracao",
-                )
-
-                dispositivo = st.selectbox(
-                    "Dispositivo utilizado",
-                    ["V08", "V09", "V10", "Tessari", "Outros"],
-                    key="gran_dispositivo",
-                )
-
-                outro_dispositivo = ""
-
-                if dispositivo == "Outros":
-                    outro_dispositivo = st.text_input(
-                        "Especifique o dispositivo:",
-                        key="gran_outro_disp"
+                    tempo = st.number_input(
+                        "Tempo de estabilidade (segundos)",
+                        min_value=0,
+                        step=1,
+                        key="gran_tempo",
                     )
 
-                uploaded_file = st.file_uploader(
-                    "Escolha a imagem do teste:",
-                    type=["png", "jpg", "jpeg"],
-                    key="gran_upload_imagem",
-                )
+                    concentracao = st.selectbox(
+                        "Concentração do Polidocanol",
+                        ["3,00%", "1,00%", "0,50%", "0,25%"],
+                        key="gran_concentracao",
+                    )
 
-                submitted = st.form_submit_button("Salvar Registro no Supabase")
+                    dispositivo = st.selectbox(
+                        "Dispositivo utilizado",
+                        ["V08", "V09", "V10", "Tessari", "Outros"],
+                        key="gran_dispositivo",
+                    )
 
-                if submitted:
-                    if uploaded_file is None:
-                        st.error("Por favor, faça o upload da imagem primeiro.")
-                    else:
-                        try:
-                            nome_final, extensao, _ = montar_nome_arquivo(
-                                amostra=amostra,
-                                teste=teste,
-                                tempo=tempo,
-                                concentracao=concentracao,
-                                dispositivo=dispositivo,
-                                uploaded_file=uploaded_file,
-                                outro_dispositivo=outro_dispositivo,
-                            )
+                    outro_dispositivo = ""
 
-                            with st.spinner("Salvando no Supabase..."):
-                                path_salvo, erro = upload_imagem_supabase(
-                                    uploaded_file,
-                                    nome_destino=nome_final,
+                    if dispositivo == "Outros":
+                        outro_dispositivo = st.text_input(
+                            "Especifique o dispositivo:",
+                            key="gran_outro_disp"
+                        )
+
+                    uploaded_file = st.file_uploader(
+                        "Escolha a imagem do teste:",
+                        type=["png", "jpg", "jpeg"],
+                        key="gran_upload_imagem",
+                    )
+
+                    submitted = st.form_submit_button("Salvar Registro no Supabase")
+
+                    if submitted:
+                        if uploaded_file is None:
+                            st.error("Por favor, faça o upload da imagem primeiro.")
+                        else:
+                            try:
+                                nome_final, extensao, _ = montar_nome_arquivo(
+                                    amostra=amostra,
+                                    teste=teste,
+                                    tempo=tempo,
+                                    concentracao=concentracao,
+                                    dispositivo=dispositivo,
+                                    uploaded_file=uploaded_file,
+                                    outro_dispositivo=outro_dispositivo,
                                 )
 
-                            if erro:
-                                st.error(f"Erro ao salvar no Supabase: {erro}")
-                            else:
-                                st.success(
-                                    f"Arquivo salvo com sucesso! Nome: {path_salvo}"
-                                )
+                                with st.spinner("Salvando no Supabase..."):
+                                    path_salvo, erro = upload_imagem_supabase(
+                                        uploaded_file,
+                                        nome_destino=nome_final,
+                                    )
 
-                        except Exception as e:
-                            st.error(f"Erro no cadastro da imagem: {e}")
+                                if erro:
+                                    st.error(f"Erro ao salvar no Supabase: {erro}")
+                                else:
+                                    st.success(
+                                        f"Arquivo salvo com sucesso! Nome: {path_salvo}"
+                                    )
 
-        with aba_consulta:
-            render_consulta_imagens(
-                listar_imagens_supabase=listar_imagens_supabase,
-                montar_url_publica=montar_url_publica,
-                session_state=st.session_state,
-                salvar_resultado_teste=salvar_resultado_teste_supabase,
-            )
+                            except Exception as e:
+                                st.error(f"Erro no cadastro da imagem: {e}")
 
     else:
         with st.form("form_novo_teste", clear_on_submit=True):
