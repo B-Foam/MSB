@@ -595,6 +595,7 @@ def render_consulta_imagens(
 
         st.markdown("### Ajuste da área útil circular")
         col1, col2, col3 = st.columns(3)
+
         with col1:
             roi_info["cx"] = st.number_input(
                 "Centro X ROI",
@@ -604,6 +605,7 @@ def render_consulta_imagens(
                 step=1,
                 key=f"roi_cx_{imagem_escolhida}",
             )
+
         with col2:
             roi_info["cy"] = st.number_input(
                 "Centro Y ROI",
@@ -613,6 +615,7 @@ def render_consulta_imagens(
                 step=1,
                 key=f"roi_cy_{imagem_escolhida}",
             )
+
         with col3:
             roi_info["r"] = st.number_input(
                 "Raio ROI",
@@ -672,10 +675,6 @@ def render_consulta_imagens(
 
         mask_roi = criar_mascara_roi(img_bgr.shape, roi_info, barra_info)
 
-        st.markdown("### Imagem 1 — área útil + calibração")
-        img_roi = desenhar_imagem_roi(img_bgr, roi_info, barra_info=barra_info)
-        st.image(cv_to_pil(img_roi), use_container_width=True)
-
         if px_per_mm:
             st.success(f"Barra detectada: {px_per_mm:.2f} px para 1,0 mm")
         else:
@@ -699,16 +698,46 @@ def render_consulta_imagens(
 
         bolhas = session_state.get(key_bolhas, [])
 
-        st.markdown("### Imagem 2 — bolhas detectadas")
-        if bolhas:
-            img_final = desenhar_bolhas_coloridas(
-                shape=img_bgr.shape,
-                roi_info=roi_info,
-                bolhas=bolhas,
+        # ============================================================
+        # VISUALIZAÇÃO COMPARATIVA LADO A LADO
+        # ============================================================
+        st.markdown("### Comparação visual da análise")
+
+        col_img1, col_img2 = st.columns(2)
+
+        with col_img1:
+            st.markdown("**Imagem original com ROI e calibração**")
+            img_roi = desenhar_imagem_roi(
+                img_bgr,
+                roi_info,
                 barra_info=barra_info,
             )
-            st.image(cv_to_pil(img_final), use_container_width=True)
+            st.image(
+                cv_to_pil(img_roi),
+                use_container_width=True,
+            )
 
+        with col_img2:
+            st.markdown("**Imagem tratada com bolhas detectadas**")
+
+            if bolhas:
+                img_final = desenhar_bolhas_coloridas(
+                    shape=img_bgr.shape,
+                    roi_info=roi_info,
+                    bolhas=bolhas,
+                    barra_info=barra_info,
+                )
+                st.image(
+                    cv_to_pil(img_final),
+                    use_container_width=True,
+                )
+            else:
+                st.info("Ainda não há bolhas detectadas. Clique em **Detectar bolhas**.")
+
+        # ============================================================
+        # RESULTADOS NUMÉRICOS
+        # ============================================================
+        if bolhas:
             df_bolhas = montar_tabela_bolhas(bolhas, px_per_mm)
             df_faixas = montar_tabela_faixas(df_bolhas)
 
@@ -718,10 +747,13 @@ def render_consulta_imagens(
 
             st.markdown("### Resumo dos resultados")
             m1, m2, m3 = st.columns(3)
+
             with m1:
                 st.metric("Quantidade total", quantidade_total)
+
             with m2:
                 st.metric("Bolhas > 500 µm", quantidade_maior_500)
+
             with m3:
                 st.metric("% > 500 µm", f"{percentual_maior_500:.2f}%")
 
@@ -767,4 +799,4 @@ def render_consulta_imagens(
                     st.error(f"Erro ao armazenar os dados do teste: {e}")
 
         else:
-            st.info("Ainda não há bolhas detectadas para esta imagem. Clique em **Detectar bolhas**.")
+            st.info("Ainda não há resultados numéricos. Clique em **Detectar bolhas** para gerar tabelas e gráficos.")
