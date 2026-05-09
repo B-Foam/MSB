@@ -335,7 +335,7 @@ def render_revista_msb():
             const pages = {html_paginas};
 
             let currentPage = 0;
-            let zoom = 1.18;
+            let zoom = 1.00;
             let lastWheelTime = 0;
 
             const pageImage = document.getElementById("pageImage");
