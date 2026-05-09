@@ -1,5 +1,14 @@
-import streamlit as st
+import base64
 from pathlib import Path
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+
+def imagem_para_base64(caminho: Path) -> str:
+    """Converte imagem local em base64 para usar dentro do HTML."""
+    with open(caminho, "rb") as arquivo:
+        return base64.b64encode(arquivo.read()).decode("utf-8")
 
 
 def render_revista_msb():
@@ -27,146 +36,410 @@ def render_revista_msb():
         {"titulo": "Contracapa", "arquivo": "11-contracapa.png"},
     ]
 
-    if "pagina_revista_msb" not in st.session_state:
-        st.session_state.pagina_revista_msb = 0
+    imagens = []
+    arquivos_nao_encontrados = []
 
-    total_paginas = len(paginas)
+    for pagina in paginas:
+        caminho = revista_dir / pagina["arquivo"]
 
-    if st.session_state.pagina_revista_msb < 0:
-        st.session_state.pagina_revista_msb = 0
+        if caminho.exists():
+            imagens.append(
+                {
+                    "titulo": pagina["titulo"],
+                    "arquivo": pagina["arquivo"],
+                    "src": f"data:image/png;base64,{imagem_para_base64(caminho)}",
+                }
+            )
+        else:
+            arquivos_nao_encontrados.append(str(caminho))
 
-    if st.session_state.pagina_revista_msb > total_paginas - 1:
-        st.session_state.pagina_revista_msb = total_paginas - 1
+    if arquivos_nao_encontrados:
+        st.error("Algumas imagens da revista não foram encontradas:")
+        for arquivo in arquivos_nao_encontrados:
+            st.write(f"- {arquivo}")
+        st.warning("Verifique se os nomes dos arquivos estão iguais aos nomes salvos no GitHub.")
+        return
 
-    pagina_atual = st.session_state.pagina_revista_msb
-    pagina_info = paginas[pagina_atual]
-    caminho_imagem = revista_dir / pagina_info["arquivo"]
+    html_paginas = str(imagens).replace("</", "<\\/")
 
-    st.markdown(
-        """
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8" />
         <style>
-        .revista-container {
-            background: linear-gradient(135deg, #f7fbff 0%, #ffffff 50%, #eaf4fb 100%);
-            border-radius: 22px;
-            padding: 24px;
-            border: 1px solid #d9e8f2;
-            box-shadow: 0 8px 28px rgba(0, 35, 70, 0.08);
-            margin-top: 18px;
-            margin-bottom: 18px;
-        }
+            * {{
+                box-sizing: border-box;
+            }}
 
-        .revista-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            color: #0b2d55;
-            font-weight: 700;
-            font-size: 18px;
-        }
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: Arial, Helvetica, sans-serif;
+                background: linear-gradient(135deg, #061b33, #0b2d55, #eaf4fb);
+                overflow: hidden;
+            }}
 
-        .revista-subtitle {
-            color: #4b6b88;
-            font-size: 14px;
-            margin-top: -8px;
-            margin-bottom: 16px;
-        }
+            .app {{
+                width: 100%;
+                height: 100vh;
+                min-height: 820px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 18px;
+                color: white;
+            }}
 
-        .revista-footer {
-            text-align: center;
-            color: #4b6b88;
-            font-size: 13px;
-            margin-top: 12px;
-        }
+            .topbar {{
+                width: min(1180px, 100%);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 12px;
+                background: rgba(255,255,255,0.12);
+                border: 1px solid rgba(255,255,255,0.20);
+                border-radius: 18px;
+                padding: 12px 16px;
+                backdrop-filter: blur(10px);
+            }}
 
-        .stButton > button {
-            border-radius: 12px;
-            border: 1px solid #0b5ea8;
-            color: #0b2d55;
-            font-weight: 600;
-        }
+            .title {{
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }}
 
-        .stButton > button:hover {
-            border-color: #0077c8;
-            color: #0077c8;
-        }
+            .title strong {{
+                font-size: 17px;
+                letter-spacing: 0.3px;
+            }}
+
+            .title span {{
+                font-size: 12px;
+                opacity: 0.85;
+            }}
+
+            .controls {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }}
+
+            button {{
+                border: none;
+                border-radius: 12px;
+                padding: 9px 12px;
+                font-weight: 700;
+                cursor: pointer;
+                color: #07305a;
+                background: #ffffff;
+                box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+                transition: transform 0.15s ease, background 0.15s ease;
+            }}
+
+            button:hover {{
+                transform: translateY(-1px);
+                background: #dff2ff;
+            }}
+
+            .counter {{
+                font-size: 13px;
+                padding: 8px 12px;
+                border-radius: 12px;
+                background: rgba(255,255,255,0.14);
+                border: 1px solid rgba(255,255,255,0.20);
+                min-width: 130px;
+                text-align: center;
+            }}
+
+            .viewer-wrap {{
+                width: min(1180px, 100%);
+                height: 76vh;
+                min-height: 640px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: auto;
+                background: rgba(255,255,255,0.94);
+                border-radius: 24px;
+                border: 1px solid rgba(255,255,255,0.35);
+                box-shadow: 0 20px 55px rgba(0,0,0,0.30);
+                position: relative;
+            }}
+
+            .viewer-wrap:fullscreen {{
+                width: 100vw;
+                height: 100vh;
+                min-height: 100vh;
+                border-radius: 0;
+                background: #061b33;
+                padding: 18px;
+            }}
+
+            .page-stage {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                transition: transform 0.25s ease;
+            }}
+
+            .page {{
+                max-height: 72vh;
+                max-width: 100%;
+                border-radius: 12px;
+                box-shadow: 0 14px 35px rgba(0,0,0,0.28);
+                user-select: none;
+                -webkit-user-drag: none;
+                cursor: pointer;
+                background: white;
+                transition: opacity 0.18s ease, transform 0.18s ease;
+            }}
+
+            .page.changing {{
+                opacity: 0.35;
+                transform: scale(0.985);
+            }}
+
+            .hint {{
+                width: min(1180px, 100%);
+                margin-top: 10px;
+                text-align: center;
+                color: rgba(255,255,255,0.88);
+                font-size: 13px;
+            }}
+
+            .arrow-zone {{
+                position: absolute;
+                top: 0;
+                height: 100%;
+                width: 25%;
+                z-index: 5;
+            }}
+
+            .arrow-zone.left {{
+                left: 0;
+                cursor: w-resize;
+            }}
+
+            .arrow-zone.right {{
+                right: 0;
+                cursor: e-resize;
+            }}
+
+            @media (max-width: 768px) {{
+                .app {{
+                    padding: 10px;
+                    min-height: 720px;
+                }}
+
+                .topbar {{
+                    flex-direction: column;
+                    align-items: stretch;
+                }}
+
+                .controls {{
+                    justify-content: center;
+                }}
+
+                .viewer-wrap {{
+                    height: 70vh;
+                    min-height: 520px;
+                }}
+
+                .page {{
+                    max-height: 66vh;
+                }}
+
+                button {{
+                    padding: 8px 10px;
+                    font-size: 12px;
+                }}
+            }}
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    </head>
 
-    st.markdown('<div class="revista-container">', unsafe_allow_html=True)
+    <body>
+        <div class="app">
+            <div class="topbar">
+                <div class="title">
+                    <strong id="pageTitle">Revista Técnica MSB</strong>
+                    <span>Materiais para dispositivos médicos</span>
+                </div>
 
-    st.markdown(
-        f"""
-        <div class="revista-header">
-            <div>{pagina_info["titulo"]}</div>
-            <div>Página {pagina_atual + 1} de {total_paginas}</div>
+                <div class="controls">
+                    <button onclick="goFirst()">⏮ Início</button>
+                    <button onclick="prevPage()">⬅ Anterior</button>
+                    <div class="counter" id="counter">Página 1 de 1</div>
+                    <button onclick="nextPage()">Próxima ➡</button>
+                    <button onclick="goLast()">Fim ⏭</button>
+                    <button onclick="zoomOut()">− Zoom</button>
+                    <button onclick="zoomIn()">+ Zoom</button>
+                    <button onclick="resetZoom()">100%</button>
+                    <button onclick="toggleFullscreen()">⛶ Tela cheia</button>
+                </div>
+            </div>
+
+            <div class="viewer-wrap" id="viewer">
+                <div class="arrow-zone left" onclick="prevPage()"></div>
+                <div class="arrow-zone right" onclick="nextPage()"></div>
+
+                <div class="page-stage" id="stage">
+                    <img id="pageImage" class="page" src="" alt="Página da revista MSB" onclick="nextPage()" />
+                </div>
+            </div>
+
+            <div class="hint">
+                Use o mouse: clique no lado direito para avançar, lado esquerdo para voltar, scroll para passar páginas,
+                setas do teclado para navegar e botão de tela cheia para ampliar.
+            </div>
         </div>
-        <div class="revista-subtitle">
-            MSB Medical System do Brasil — Engenharia e Materiais para Dispositivos Médicos
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-    if caminho_imagem.exists():
-        st.image(str(caminho_imagem), use_container_width=True)
-    else:
-        st.error(f"Imagem não encontrada: {caminho_imagem}")
-        st.warning(
-            "Verifique se o nome do arquivo está igual ao nome salvo no GitHub "
-            "e se ele está dentro da pasta assets/revista."
-        )
+        <script>
+            const pages = {html_paginas};
 
-    st.markdown("</div>", unsafe_allow_html=True)
+            let currentPage = 0;
+            let zoom = 1;
+            let lastWheelTime = 0;
 
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+            const pageImage = document.getElementById("pageImage");
+            const pageTitle = document.getElementById("pageTitle");
+            const counter = document.getElementById("counter");
+            const stage = document.getElementById("stage");
+            const viewer = document.getElementById("viewer");
 
-    with col1:
-        if st.button("⏮️ Início", use_container_width=True, key="btn_revista_inicio_msb"):
-            st.session_state.pagina_revista_msb = 0
-            st.rerun()
+            function renderPage() {{
+                pageImage.classList.add("changing");
 
-    with col2:
-        if st.button("⬅️ Anterior", use_container_width=True, key="btn_revista_anterior_msb"):
-            if st.session_state.pagina_revista_msb > 0:
-                st.session_state.pagina_revista_msb -= 1
-            st.rerun()
+                setTimeout(() => {{
+                    const page = pages[currentPage];
+                    pageImage.src = page.src;
+                    pageTitle.innerText = page.titulo;
+                    counter.innerText = `Página ${{currentPage + 1}} de ${{pages.length}}`;
+                    stage.style.transform = `scale(${{zoom}})`;
+                    pageImage.classList.remove("changing");
+                }}, 120);
+            }}
 
-    with col3:
-        pagina_selecionada = st.selectbox(
-            "Ir para a página:",
-            options=list(range(total_paginas)),
-            format_func=lambda i: f"{i + 1:02d} - {paginas[i]['titulo']}",
-            index=pagina_atual,
-            label_visibility="collapsed",
-            key="select_pagina_revista_msb",
-        )
+            function nextPage() {{
+                if (currentPage < pages.length - 1) {{
+                    currentPage += 1;
+                    renderPage();
+                }}
+            }}
 
-        if pagina_selecionada != pagina_atual:
-            st.session_state.pagina_revista_msb = pagina_selecionada
-            st.rerun()
+            function prevPage() {{
+                if (currentPage > 0) {{
+                    currentPage -= 1;
+                    renderPage();
+                }}
+            }}
 
-    with col4:
-        if st.button("Próxima ➡️", use_container_width=True, key="btn_revista_proxima_msb"):
-            if st.session_state.pagina_revista_msb < total_paginas - 1:
-                st.session_state.pagina_revista_msb += 1
-            st.rerun()
+            function goFirst() {{
+                currentPage = 0;
+                renderPage();
+            }}
 
-    with col5:
-        if st.button("Fim ⏭️", use_container_width=True, key="btn_revista_fim_msb"):
-            st.session_state.pagina_revista_msb = total_paginas - 1
-            st.rerun()
+            function goLast() {{
+                currentPage = pages.length - 1;
+                renderPage();
+            }}
 
-    st.markdown(
-        f"""
-        <div class="revista-footer">
-            Visualizando: <strong>{pagina_info["arquivo"]}</strong>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            function zoomIn() {{
+                zoom = Math.min(zoom + 0.15, 2.5);
+                stage.style.transform = `scale(${{zoom}})`;
+            }}
+
+            function zoomOut() {{
+                zoom = Math.max(zoom - 0.15, 0.5);
+                stage.style.transform = `scale(${{zoom}})`;
+            }}
+
+            function resetZoom() {{
+                zoom = 1;
+                stage.style.transform = `scale(${{zoom}})`;
+            }}
+
+            function toggleFullscreen() {{
+                if (!document.fullscreenElement) {{
+                    viewer.requestFullscreen().catch(() => {{
+                        alert("O navegador bloqueou a tela cheia. Tente clicar novamente no botão.");
+                    }});
+                }} else {{
+                    document.exitFullscreen();
+                }}
+            }}
+
+            document.addEventListener("keydown", function(event) {{
+                if (event.key === "ArrowRight") {{
+                    nextPage();
+                }}
+
+                if (event.key === "ArrowLeft") {{
+                    prevPage();
+                }}
+
+                if (event.key === "+" || event.key === "=") {{
+                    zoomIn();
+                }}
+
+                if (event.key === "-") {{
+                    zoomOut();
+                }}
+
+                if (event.key === "Escape") {{
+                    resetZoom();
+                }}
+            }});
+
+            viewer.addEventListener("wheel", function(event) {{
+                event.preventDefault();
+
+                const now = Date.now();
+
+                if (now - lastWheelTime < 450) {{
+                    return;
+                }}
+
+                lastWheelTime = now;
+
+                if (event.deltaY > 0) {{
+                    nextPage();
+                }} else {{
+                    prevPage();
+                }}
+            }}, {{ passive: false }});
+
+            let startX = 0;
+
+            viewer.addEventListener("mousedown", function(event) {{
+                startX = event.clientX;
+            }});
+
+            viewer.addEventListener("mouseup", function(event) {{
+                const diff = event.clientX - startX;
+
+                if (Math.abs(diff) > 60) {{
+                    if (diff < 0) {{
+                        nextPage();
+                    }} else {{
+                        prevPage();
+                    }}
+                }}
+            }});
+
+            renderPage();
+        </script>
+    </body>
+    </html>
+    """
+
+    components.html(html, height=920, scrolling=False)
 
 
 def render_manufatura():
