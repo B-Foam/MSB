@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 
 
 def imagem_para_base64(caminho: Path) -> str:
-    """Converte imagem local em base64 para usar dentro do HTML."""
+    """Converte imagem local em base64 para exibir dentro do HTML."""
     with open(caminho, "rb") as arquivo:
         return base64.b64encode(arquivo.read()).decode("utf-8")
 
@@ -57,7 +57,11 @@ def render_revista_msb():
         st.error("Algumas imagens da revista não foram encontradas:")
         for arquivo in arquivos_nao_encontrados:
             st.write(f"- {arquivo}")
-        st.warning("Verifique se os nomes dos arquivos estão iguais aos nomes salvos no GitHub.")
+
+        st.warning(
+            "Verifique se os nomes dos arquivos estão exatamente iguais aos nomes salvos no GitHub "
+            "e se todos estão dentro da pasta assets/revista."
+        )
         return
 
     html_paginas = str(imagens).replace("</", "<\\/")
@@ -67,42 +71,50 @@ def render_revista_msb():
     <html>
     <head>
         <meta charset="UTF-8" />
+
         <style>
             * {{
                 box-sizing: border-box;
             }}
 
-            body {{
+            html, body {{
                 margin: 0;
                 padding: 0;
+                width: 100%;
+                height: 100%;
                 font-family: Arial, Helvetica, sans-serif;
-                background: linear-gradient(135deg, #061b33, #0b2d55, #eaf4fb);
+                background: #061b33;
                 overflow: hidden;
+            }}
+
+            body {{
+                background: linear-gradient(135deg, #061b33 0%, #0b2d55 45%, #061b33 100%);
             }}
 
             .app {{
                 width: 100%;
                 height: 100vh;
-                min-height: 820px;
+                min-height: 980px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                padding: 18px;
+                padding: 14px;
                 color: white;
             }}
 
             .topbar {{
-                width: min(1180px, 100%);
+                width: 100%;
+                max-width: 1500px;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 12px;
-                margin-bottom: 12px;
-                background: rgba(255,255,255,0.12);
-                border: 1px solid rgba(255,255,255,0.20);
+                margin-bottom: 10px;
+                background: rgba(255, 255, 255, 0.12);
+                border: 1px solid rgba(255, 255, 255, 0.20);
                 border-radius: 18px;
-                padding: 12px 16px;
+                padding: 10px 14px;
                 backdrop-filter: blur(10px);
             }}
 
@@ -138,8 +150,9 @@ def render_revista_msb():
                 cursor: pointer;
                 color: #07305a;
                 background: #ffffff;
-                box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
                 transition: transform 0.15s ease, background 0.15s ease;
+                font-size: 13px;
             }}
 
             button:hover {{
@@ -151,54 +164,66 @@ def render_revista_msb():
                 font-size: 13px;
                 padding: 8px 12px;
                 border-radius: 12px;
-                background: rgba(255,255,255,0.14);
-                border: 1px solid rgba(255,255,255,0.20);
+                background: rgba(255, 255, 255, 0.14);
+                border: 1px solid rgba(255, 255, 255, 0.20);
                 min-width: 130px;
                 text-align: center;
             }}
 
             .viewer-wrap {{
-                width: min(1180px, 100%);
-                height: 76vh;
-                min-height: 640px;
+                width: 100%;
+                max-width: 1500px;
+                height: 86vh;
+                min-height: 820px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 overflow: auto;
-                background: rgba(255,255,255,0.94);
+                background: rgba(255, 255, 255, 0.04);
                 border-radius: 24px;
-                border: 1px solid rgba(255,255,255,0.35);
-                box-shadow: 0 20px 55px rgba(0,0,0,0.30);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                box-shadow: 0 20px 55px rgba(0, 0, 0, 0.30);
                 position: relative;
             }}
 
             .viewer-wrap:fullscreen {{
                 width: 100vw;
                 height: 100vh;
+                max-width: none;
                 min-height: 100vh;
                 border-radius: 0;
                 background: #061b33;
-                padding: 18px;
+                padding: 10px;
             }}
 
             .page-stage {{
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                padding: 20px;
+                padding: 6px;
                 transition: transform 0.25s ease;
+                width: 100%;
+                height: 100%;
+                transform-origin: center center;
             }}
 
             .page {{
-                max-height: 72vh;
-                max-width: 100%;
-                border-radius: 12px;
-                box-shadow: 0 14px 35px rgba(0,0,0,0.28);
+                height: 84vh;
+                max-height: 96vh;
+                width: auto;
+                border-radius: 10px;
+                box-shadow: 0 14px 35px rgba(0, 0, 0, 0.28);
                 user-select: none;
                 -webkit-user-drag: none;
                 cursor: pointer;
                 background: white;
                 transition: opacity 0.18s ease, transform 0.18s ease;
+            }}
+
+            .viewer-wrap:fullscreen .page {{
+                height: 96vh;
+                max-height: 96vh;
+                width: auto;
             }}
 
             .page.changing {{
@@ -207,10 +232,11 @@ def render_revista_msb():
             }}
 
             .hint {{
-                width: min(1180px, 100%);
-                margin-top: 10px;
+                width: 100%;
+                max-width: 1500px;
+                margin-top: 8px;
                 text-align: center;
-                color: rgba(255,255,255,0.88);
+                color: rgba(255, 255, 255, 0.88);
                 font-size: 13px;
             }}
 
@@ -232,10 +258,10 @@ def render_revista_msb():
                 cursor: e-resize;
             }}
 
-            @media (max-width: 768px) {{
+            @media (max-width: 900px) {{
                 .app {{
                     padding: 10px;
-                    min-height: 720px;
+                    min-height: 820px;
                 }}
 
                 .topbar {{
@@ -248,16 +274,21 @@ def render_revista_msb():
                 }}
 
                 .viewer-wrap {{
-                    height: 70vh;
-                    min-height: 520px;
+                    height: 74vh;
+                    min-height: 600px;
                 }}
 
                 .page {{
-                    max-height: 66vh;
+                    height: 70vh;
+                    max-height: 90vh;
                 }}
 
                 button {{
                     padding: 8px 10px;
+                    font-size: 12px;
+                }}
+
+                .hint {{
                     font-size: 12px;
                 }}
             }}
@@ -295,8 +326,8 @@ def render_revista_msb():
             </div>
 
             <div class="hint">
-                Use o mouse: clique no lado direito para avançar, lado esquerdo para voltar, scroll para passar páginas,
-                setas do teclado para navegar e botão de tela cheia para ampliar.
+                Clique no lado direito para avançar, no lado esquerdo para voltar.
+                Também funciona com scroll do mouse, setas do teclado, zoom e tela cheia.
             </div>
         </div>
 
@@ -304,7 +335,7 @@ def render_revista_msb():
             const pages = {html_paginas};
 
             let currentPage = 0;
-            let zoom = 1;
+            let zoom = 1.18;
             let lastWheelTime = 0;
 
             const pageImage = document.getElementById("pageImage");
@@ -351,17 +382,17 @@ def render_revista_msb():
             }}
 
             function zoomIn() {{
-                zoom = Math.min(zoom + 0.15, 2.5);
+                zoom = Math.min(zoom + 0.12, 2.6);
                 stage.style.transform = `scale(${{zoom}})`;
             }}
 
             function zoomOut() {{
-                zoom = Math.max(zoom - 0.15, 0.5);
+                zoom = Math.max(zoom - 0.12, 0.55);
                 stage.style.transform = `scale(${{zoom}})`;
             }}
 
             function resetZoom() {{
-                zoom = 1;
+                zoom = 1.18;
                 stage.style.transform = `scale(${{zoom}})`;
             }}
 
@@ -439,7 +470,7 @@ def render_revista_msb():
     </html>
     """
 
-    components.html(html, height=920, scrolling=False)
+    components.html(html, height=1050, scrolling=False)
 
 
 def render_manufatura():
