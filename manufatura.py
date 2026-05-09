@@ -23,17 +23,25 @@ def render_revista_msb():
     revista_dir = Path("assets/revista")
 
     paginas = [
+           
         {"titulo": "Capa", "arquivo": "01-capa.png"},
         {"titulo": "Página em branco", "arquivo": "02-pagina-branca.png"},
         {"titulo": "Sumário", "arquivo": "03-sumario.png"},
         {"titulo": "Polímeros e Termoplásticos", "arquivo": "04-polimeros.png"},
         {"titulo": "Elastômeros e Borrachas", "arquivo": "05-elastomeros.png"},
-        {"titulo": "Metais e Ligas", "arquivo": "06-metais.png"},
+
+        # Corrigido: arquivo 09 está com a imagem de Metais
+        {"titulo": "Metais e Ligas", "arquivo": "09-radiopacificantes.png"},
+
         {"titulo": "Cerâmicas Avançadas", "arquivo": "07-ceramicas.png"},
         {"titulo": "Adesivos e Revestimentos", "arquivo": "08-adesivos.png"},
-        {"titulo": "Radiopacificantes e Aditivos", "arquivo": "09-radiopacificantes.png"},
+
+        # Corrigido: arquivo 06 está com a imagem de Radiopacificantes
+        {"titulo": "Radiopacificantes e Aditivos", "arquivo": "06-metais.png"},
+
         {"titulo": "Normas e Certificações", "arquivo": "10-normas.png"},
         {"titulo": "Contracapa", "arquivo": "11-contracapa.png"},
+    
     ]
 
     imagens = []
