@@ -11,64 +11,37 @@ def render_revista_msb():
         """
     )
 
-    # Caminho da pasta onde estão as imagens
     revista_dir = Path("assets/revista")
 
     paginas = [
-        {
-            "titulo": "Capa",
-            "arquivo": "01-capa.png",
-        },
-        {
-            "titulo": "Página em branco",
-            "arquivo": "02-pagina-branca.png",
-        },
-        {
-            "titulo": "Sumário",
-            "arquivo": "03-sumario.png",
-        },
-        {
-            "titulo": "Polímeros e Termoplásticos",
-            "arquivo": "04-polimeros.png",
-        },
-        {
-            "titulo": "Elastômeros e Borrachas",
-            "arquivo": "05-elastomeros.png",
-        },
-        {
-            "titulo": "Metais e Ligas",
-            "arquivo": "06-metais.png",
-        },
-        {
-            "titulo": "Cerâmicas Avançadas",
-            "arquivo": "07-ceramicas.png",
-        },
-        {
-            "titulo": "Adesivos e Revestimentos",
-            "arquivo": "08-adesivos.png",
-        },
-        {
-            "titulo": "Radiopacificantes e Aditivos",
-            "arquivo": "09-radiopacificantes.png",
-        },
-        {
-            "titulo": "Normas e Certificações",
-            "arquivo": "10-normas.png",
-        },
-        {
-            "titulo": "Contracapa",
-            "arquivo": "11-contracapa.png",
-        },
+        {"titulo": "Capa", "arquivo": "01-capa.png"},
+        {"titulo": "Página em branco", "arquivo": "02-pagina-branca.png"},
+        {"titulo": "Sumário", "arquivo": "03-sumario.png"},
+        {"titulo": "Polímeros e Termoplásticos", "arquivo": "04-polimeros.png"},
+        {"titulo": "Elastômeros e Borrachas", "arquivo": "05-elastomeros.png"},
+        {"titulo": "Metais e Ligas", "arquivo": "06-metais.png"},
+        {"titulo": "Cerâmicas Avançadas", "arquivo": "07-ceramicas.png"},
+        {"titulo": "Adesivos e Revestimentos", "arquivo": "08-adesivos.png"},
+        {"titulo": "Radiopacificantes e Aditivos", "arquivo": "09-radiopacificantes.png"},
+        {"titulo": "Normas e Certificações", "arquivo": "10-normas.png"},
+        {"titulo": "Contracapa", "arquivo": "11-contracapa.png"},
     ]
 
-    # Estado inicial da página da revista
     if "pagina_revista_msb" not in st.session_state:
         st.session_state.pagina_revista_msb = 0
 
-    pagina_atual = st.session_state.pagina_revista_msb
     total_paginas = len(paginas)
 
-    # CSS para deixar a revista mais bonita
+    if st.session_state.pagina_revista_msb < 0:
+        st.session_state.pagina_revista_msb = 0
+
+    if st.session_state.pagina_revista_msb > total_paginas - 1:
+        st.session_state.pagina_revista_msb = total_paginas - 1
+
+    pagina_atual = st.session_state.pagina_revista_msb
+    pagina_info = paginas[pagina_atual]
+    caminho_imagem = revista_dir / pagina_info["arquivo"]
+
     st.markdown(
         """
         <style>
@@ -122,9 +95,6 @@ def render_revista_msb():
         unsafe_allow_html=True,
     )
 
-    pagina_info = paginas[pagina_atual]
-    caminho_imagem = revista_dir / pagina_info["arquivo"]
-
     st.markdown('<div class="revista-container">', unsafe_allow_html=True)
 
     st.markdown(
@@ -151,16 +121,15 @@ def render_revista_msb():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Botões de navegação
     col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
 
     with col1:
-        if st.button("⏮️ Início", use_container_width=True):
+        if st.button("⏮️ Início", use_container_width=True, key="btn_revista_inicio_msb"):
             st.session_state.pagina_revista_msb = 0
             st.rerun()
 
     with col2:
-        if st.button("⬅️ Anterior", use_container_width=True):
+        if st.button("⬅️ Anterior", use_container_width=True, key="btn_revista_anterior_msb"):
             if st.session_state.pagina_revista_msb > 0:
                 st.session_state.pagina_revista_msb -= 1
             st.rerun()
@@ -172,6 +141,7 @@ def render_revista_msb():
             format_func=lambda i: f"{i + 1:02d} - {paginas[i]['titulo']}",
             index=pagina_atual,
             label_visibility="collapsed",
+            key="select_pagina_revista_msb",
         )
 
         if pagina_selecionada != pagina_atual:
@@ -179,13 +149,13 @@ def render_revista_msb():
             st.rerun()
 
     with col4:
-        if st.button("Próxima ➡️", use_container_width=True):
+        if st.button("Próxima ➡️", use_container_width=True, key="btn_revista_proxima_msb"):
             if st.session_state.pagina_revista_msb < total_paginas - 1:
                 st.session_state.pagina_revista_msb += 1
             st.rerun()
 
     with col5:
-        if st.button("Fim ⏭️", use_container_width=True):
+        if st.button("Fim ⏭️", use_container_width=True, key="btn_revista_fim_msb"):
             st.session_state.pagina_revista_msb = total_paginas - 1
             st.rerun()
 
@@ -202,7 +172,7 @@ def render_revista_msb():
 def render_manufatura():
     st.markdown("# 🏭 Manufatura")
 
-    if st.button("⬅️ Voltar ao Menu Principal"):
+    if st.button("⬅️ Voltar ao Menu Principal", key="btn_voltar_menu_manufatura"):
         st.session_state.pagina = "selecao"
         st.rerun()
 
